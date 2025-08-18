@@ -45,6 +45,8 @@ const App: React.FC = () => {
   const [loadingInstrument, setLoadingInstrument] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [unlockAttempted, setUnlockAttempted] = useState(false);
+  const initialIsMobile = typeof navigator !== 'undefined' && /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent);
+  const isMobileRef = useRef<boolean>(initialIsMobile);
 
   const [keyCenter, setKeyCenter] = useState<string>('C');
   const keyCenterRef = useRef<string>('C');
@@ -67,6 +69,26 @@ const App: React.FC = () => {
   const autoplayTimeoutRef = useRef<number | null>(null);
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
+  const primeAudio = useCallback(async () => {
+    if (!audioCtxRef.current) return;
+    try {
+      const ctx = audioCtxRef.current;
+      // 1-frame buffer trick
+      const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      src.start(0);
+      // Low gain short oscillator (inaudible) to fully unlock
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.05);
+    } catch {}
+  }, []);
+
   const initInstrument = useCallback(async () => {
     try {
       if (!audioCtxRef.current) {
@@ -75,11 +97,10 @@ const App: React.FC = () => {
         setAudioCtx(ctx); // trigger rerender if needed
       }
       if (audioCtxRef.current?.state === 'suspended') {
-        await audioCtxRef.current.resume().catch(()=>{});
+        try { await audioCtxRef.current.resume(); } catch {}
       }
-      if (audioCtxRef.current?.state === 'running') {
-        setAudioUnlocked(true);
-      }
+      await primeAudio();
+      if (audioCtxRef.current?.state === 'running') setAudioUnlocked(true);
       if (instrumentRef.current) return;
       setLoadingInstrument(true);
       const piano = await Soundfont.instrument(audioCtxRef.current!, 'acoustic_grand_piano');
@@ -87,7 +108,7 @@ const App: React.FC = () => {
     } finally {
       setLoadingInstrument(false);
     }
-  }, []);
+  }, [primeAudio]);
 
   const unlockAudio = useCallback(async () => {
     setUnlockAttempted(true);
@@ -310,9 +331,17 @@ const App: React.FC = () => {
   // Attempt passive unlock on first pointer interaction (won't show errors if blocked)
   useEffect(() => {
     if (audioUnlocked) return;
-    const handler = () => { unlockAudio(); document.removeEventListener('pointerdown', handler); };
-    document.addEventListener('pointerdown', handler, { once: true });
-    return () => document.removeEventListener('pointerdown', handler);
+    if (!isMobileRef.current) { // desktop usually auto unlocks; attempt silently
+      unlockAudio();
+      return;
+    }
+    const handler = () => { unlockAudio(); };
+    document.addEventListener('touchend', handler, { once: true, passive: true });
+    document.addEventListener('mousedown', handler, { once: true });
+    return () => {
+      document.removeEventListener('touchend', handler);
+      document.removeEventListener('mousedown', handler);
+    };
   }, [audioUnlocked, unlockAudio]);
 
   // Recompute solfege if key changes while a note is displayed (e.g., manual key switch without immediate playback)
@@ -329,15 +358,16 @@ const App: React.FC = () => {
 
   return (
     <div>
-      {!audioUnlocked && (
+  {!audioUnlocked && isMobileRef.current && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center'}}>
           <h2 style={{margin:'0 0 1rem'}}>Enable Audio</h2>
           <p style={{maxWidth:480, fontSize:'0.9rem', lineHeight:1.4}}>
-            Mobile browsers (especially iOS Safari) require a tap before sound can play. Tap the button below once, then use Play or Cadence. If your iPhone is in silent mode, switch the hardware mute off.
+    Mobile browsers (especially iOS Safari) require a tap before sound can play. Tap Enable Audio once, then use Play or Cadence. Ensure Silent Mode (ringer switch) is OFF and device volume is up.
           </p>
           <button onClick={unlockAudio} disabled={loadingInstrument} style={{fontSize:'1.1rem', padding:'0.75rem 1.25rem', marginTop:'1rem'}}>
             {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
           </button>
+      <p style={{marginTop:'1rem', fontSize:'0.7rem', opacity:0.8}}>If still silent: toggle mute switch, raise volume, then tap again.</p>
         </div>
       )}
       <h1>Solfege Ear Trainer</h1>
