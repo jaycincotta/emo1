@@ -38,9 +38,21 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
   useLayoutEffect(()=>{
     if (!wrapRef.current) return;
     const el = wrapRef.current;
-    const MIN_W = 9; const IDEAL_W = 42; const LEGIBLE_W = 18;
+    const MIN_W = 9; const IDEAL_W = 42; const LEGIBLE_W = 18; // portrait legibility target
     const decide = () => {
       const avail = el.clientWidth;
+      const isLandscape = window.innerWidth > window.innerHeight;
+      if (isLandscape) {
+        // In landscape, strongly prefer a single row; accept key widths down to MIN_W before wrapping.
+        const perKey = Math.floor(avail / totalWhite);
+        if (perKey >= MIN_W) {
+          setWrapped(false);
+          setWhiteW(Math.min(IDEAL_W, Math.max(MIN_W, perKey)));
+          return;
+        }
+        // fall through to wrapped if truly too narrow
+      }
+      // Portrait (or too narrow landscape): use legibility threshold logic.
       if (avail >= totalWhite * LEGIBLE_W) {
         setWrapped(false);
         if (avail >= totalWhite * IDEAL_W) setWhiteW(IDEAL_W); else setWhiteW(Math.max(LEGIBLE_W, Math.floor(avail/totalWhite)));
@@ -54,7 +66,8 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
     };
     decide();
     const ro = new ResizeObserver(decide); ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener('orientationchange', decide);
+    return () => { ro.disconnect(); window.removeEventListener('orientationchange', decide); };
   }, [totalWhite, totalWhiteLow, totalWhiteHigh]);
 
   const handleSelectWhite = useCallback((midi:number)=>{
@@ -68,9 +81,11 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
     }
   }, [low, high, onChange]);
 
-  // Increase white key height multiplier so whites appear less stubby while keeping 13:9 ratio.
-  const whiteH = Math.round(whiteW * 5.0);
-  const blackH = Math.round(whiteH * 9 / 15); // maintain 13:9 ratio
+  // Visual dimensions: white key length (height in our horizontal layout) and black key length.
+  // Empirically, real acoustic pianos expose black keys at roughly 60-64% of the visible white key length.
+  const whiteH = Math.round(whiteW * 4.0); // tuned for on-screen proportions
+  const BLACK_LEN_RATIO = 0.52; // adjustable single source of truth
+  const blackH = Math.round(whiteH * BLACK_LEN_RATIO);
 
   // renderRow: when global=true we are rendering allKeys (no wrap) and must offset
   // black key positioning for the upper segment by totalWhiteLow to keep spacing correct.
