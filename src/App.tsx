@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Soundfont, { Player } from 'soundfont-player';
+import Soundfont, { Player } from 'soundfont-player'; // (legacy loading retained temporarily)
 import FullKeyboardRange from './components/FullKeyboardRange';
 import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
+import { AudioService } from './audio/AudioService';
 
 const App: React.FC = () => {
   const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null); // state kept for potential UI/debug
@@ -313,35 +314,33 @@ const App: React.FC = () => {
     setDebugInfo(`playNote -> ctx=${ctx?.state}`);
   }, [safePlay, audioUnlocked]);
 
-  const scheduleCadence = useCallback((keyOverride?: string): number => {
-    const ctx = audioCtxRef.current;
-    if (!instrumentRef.current || !ctx) return 0;
-    const root = computeRoot(keyOverride ?? keyCenterRef.current);
-    const tempo = TEMPO_VALUES[cadenceSpeed];
-    // triads: root position simple
-    const I = [root, root+4, root+7];
-    const IV = [root+5, root+9, root+12];
-    const V = [root+7, root+11, root+14];
+  // Transitional: use local scheduling first; prefer service when loaded
+  const audioServiceRef = useRef<AudioService | null>(null);
+  if (!audioServiceRef.current) audioServiceRef.current = new AudioService();
 
-    let rel = 0; // relative seconds from start
-    const chordDuration = 0.9 * tempo;
-    const chordGap = 0.1 * tempo;
-    const seq: number[][] = [I, IV, V, I];
-    const baseTime = ctx.currentTime + 0.05; // slight offset to avoid scheduling in past
-    seq.forEach(ch => {
-      ch.forEach(n => {
-        if (instrumentRef.current) {
-          instrumentRef.current.play(midiToName(n), baseTime + rel, { duration: chordDuration });
-        } else {
-          // fallback schedule approximate using setTimeout & osc
-          setTimeout(() => fallbackOsc(n, chordDuration * 0.9), (baseTime + rel - ctx.currentTime) * 1000);
-        }
+  const scheduleCadence = useCallback((keyOverride?: string): number => {
+    // If service instrument loaded mirror existing instrumentRef
+    if (instrumentRef.current && audioCtxRef.current) {
+      // Use existing inline logic (kept for parity) until service fully owns load
+      const root = computeRoot(keyOverride ?? keyCenterRef.current);
+      const tempo = TEMPO_VALUES[cadenceSpeed];
+      const I = [root, root+4, root+7];
+      const IV = [root+5, root+9, root+12];
+      const V = [root+7, root+11, root+14];
+      let rel = 0;
+      const chordDuration = 0.9 * tempo;
+      const chordGap = 0.1 * tempo;
+      const seq = [I, IV, V, I];
+      const ctx = audioCtxRef.current;
+      const baseTime = ctx!.currentTime + 0.05;
+      seq.forEach(ch => {
+        ch.forEach(n => instrumentRef.current!.play(midiToName(n), baseTime + rel, { duration: chordDuration }));
+        rel += chordDuration + chordGap;
       });
-      rel += chordDuration + chordGap;
-    });
-  // console.debug('Cadence scheduled', { root, totalSeconds: rel, keyOverride });
-    return rel; // total length in seconds
-  }, [cadenceSpeed, fallbackOsc]);
+      return rel;
+    }
+    return 0;
+  }, [cadenceSpeed]);
 
   const chooseRandomNote = useCallback(() => {
     const attempts = 50;
