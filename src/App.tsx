@@ -68,6 +68,8 @@ const App: React.FC = () => {
   const cadenceTimeoutRef = useRef<number | null>(null);
   const autoplayTimeoutRef = useRef<number | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>('');
+  const [ctxTime, setCtxTime] = useState<number>(0);
+  const [ctxProgressing, setCtxProgressing] = useState<boolean | null>(null);
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const primeAudio = useCallback(async () => {
@@ -122,6 +124,24 @@ const App: React.FC = () => {
   if (audioCtxRef.current) setDebugInfo(`unlock gesture -> state=${audioCtxRef.current.state}`);
     }
   }, [initInstrument]);
+
+  const hardResetAudio = useCallback(() => {
+    try {
+      instrumentRef.current = null;
+      if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
+      audioCtxRef.current = null;
+      setAudioCtx(null);
+      setAudioUnlocked(false);
+      setDebugInfo('AudioContext reset');
+    } catch {}
+  }, []);
+
+  const playHtmlBeep = useCallback(() => {
+    try {
+      const a = new Audio('data:audio/wav;base64,UklGRkQAAABXQVZFZm10IBAAAAABAAEAIlYAABAAAAABAAgAZGF0YQAAAAA=');
+      a.play().then(()=>setDebugInfo(d=>d+' | htmlAudio ok')).catch(()=>setDebugInfo(d=>d+' | htmlAudio err'));
+    } catch {}
+  }, []);
 
   const computeRoot = (key: string) => {
     const base = 60; // anchor at C4 octave
@@ -355,6 +375,22 @@ const App: React.FC = () => {
     };
   }, [audioUnlocked, unlockAudio]);
 
+  useEffect(() => {
+    let id: number | null = null;
+    const prevRef = { t: audioCtxRef.current?.currentTime };
+    const loop = () => {
+      if (audioCtxRef.current) {
+        const t = audioCtxRef.current.currentTime;
+        setCtxProgressing(p => p == null ? null : (t !== prevRef.t));
+        setCtxTime(t);
+        prevRef.t = t;
+      }
+      id = window.setTimeout(loop, 600);
+    };
+    loop();
+    return () => { if (id) clearTimeout(id); };
+  }, []);
+
   // Recompute solfege if key changes while a note is displayed (e.g., manual key switch without immediate playback)
   useEffect(()=> { keyCenterRef.current = keyCenter; }, [keyCenter]);
   useEffect(() => {
@@ -370,21 +406,27 @@ const App: React.FC = () => {
   return (
     <div>
   {!audioUnlocked && isMobileRef.current && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center'}}>
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center', backdropFilter:'blur(2px)'}}>
           <h2 style={{margin:'0 0 1rem'}}>Enable Audio</h2>
-          <p style={{maxWidth:480, fontSize:'0.9rem', lineHeight:1.4}}>
-    Mobile browsers (especially iOS Safari) require a tap before sound can play. Tap Enable Audio once, then use Play or Cadence. Ensure Silent Mode (ringer switch) is OFF and device volume is up.
+          <p style={{maxWidth:520, fontSize:'0.85rem', lineHeight:1.4}}>
+            Tap Enable Audio (and possibly Test Tone) to unlock sound. Turn OFF Silent Mode and raise volume. Stay on this page for a moment if the clock is not advancing.
           </p>
-          <button onClick={unlockAudio} disabled={loadingInstrument} style={{fontSize:'1.1rem', padding:'0.75rem 1.25rem', marginTop:'1rem'}}>
+          <button onClick={unlockAudio} disabled={loadingInstrument} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem', marginTop:'0.6rem'}}>
             {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
           </button>
-      <p style={{marginTop:'1rem', fontSize:'0.7rem', opacity:0.8}}>If still silent: toggle mute switch, raise volume, then tap again.</p>
-      {debugInfo && <code style={{marginTop:'0.75rem', fontSize:'0.6rem', opacity:0.6}}>{debugInfo}</code>}
-      <button onClick={() => {
-        if (!audioCtxRef.current) return; const ctx = audioCtxRef.current; if (ctx.state==='suspended') ctx.resume();
-        const osc = ctx.createOscillator(); const gain = ctx.createGain(); gain.gain.value=0.05; osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime+0.25); setTimeout(()=>gain.disconnect(), 400); setDebugInfo(`testTone ctx=${ctx.state}`);
-        setAudioUnlocked(ctx.state==='running');
-      }} style={{marginTop:'0.5rem', fontSize:'0.65rem'}}>Test Tone</button>
+          <div style={{display:'flex', gap:'0.4rem', marginTop:'0.6rem', flexWrap:'wrap', justifyContent:'center'}}>
+            <button onClick={() => {
+              if (!audioCtxRef.current) return; const ctx = audioCtxRef.current; if (ctx.state==='suspended') ctx.resume();
+              const osc = ctx.createOscillator(); const gain = ctx.createGain(); gain.gain.value=0.04; osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime+0.3); setTimeout(()=>gain.disconnect(), 500); setDebugInfo(`testTone ctx=${ctx.state}`);
+              setAudioUnlocked(ctx.state==='running');
+            }} style={{fontSize:'0.65rem'}}>Test Tone</button>
+            <button onClick={playHtmlBeep} style={{fontSize:'0.65rem'}}>HTML Beep</button>
+            <button onClick={hardResetAudio} style={{fontSize:'0.65rem'}}>Reset</button>
+          </div>
+          <div style={{marginTop:'0.75rem', fontSize:'0.55rem', opacity:0.7, maxWidth:340}}>
+            <div>{debugInfo}</div>
+            <div>ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} sr {audioCtxRef.current?.sampleRate || '?'} </div>
+          </div>
         </div>
       )}
       <h1>Solfege Ear Trainer</h1>
