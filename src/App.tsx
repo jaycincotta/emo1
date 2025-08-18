@@ -3,6 +3,7 @@ import FullKeyboardRange from './components/FullKeyboardRange';
 import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 import { AudioService } from './audio/AudioService';
 import { useAudioUnlock } from './hooks/useAudioUnlock';
+import { useAutoplayCycle } from './hooks/useAutoplayCycle';
 import { UnlockOverlay } from './components';
 
 const App: React.FC = () => {
@@ -48,9 +49,7 @@ const App: React.FC = () => {
   const [highPitch, setHighPitch] = useState(DEFAULT_HIGH);
   const [cadenceSpeed, setCadenceSpeed] = useState<'slow'|'medium'|'fast'>('medium');
   const [autoPlaySpeed, setAutoPlaySpeed] = useState<'slow'|'medium'|'fast'>('medium');
-  const [isPlaying, setIsPlaying] = useState(false);
-  const cadenceTimeoutRef = useRef<number | null>(null);
-  const autoplayTimeoutRef = useRef<number | null>(null);
+  const [isPlayingExternal, setIsPlayingExternal] = useState(false); // removed later; kept for compatibility
   const [htmlPrimed, setHtmlPrimed] = useState(false); // local tracking still used for post-load soft ping
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
@@ -238,102 +237,16 @@ const App: React.FC = () => {
     }
   }, [chooseRandomNote, playNote]);
 
-  const firstPlayRef = useRef(true);
-
-  const startSequence = useCallback(async (causeNewKeyCenter: boolean = false, keyOverride?: string) => {
-    await initInstrument();
-    const autoplayMode = autoPlay;
-    setIsPlaying(autoplayMode); // only 'playing' when autoplay loop active
-    // Clear timers
-    if (cadenceTimeoutRef.current) window.clearTimeout(cadenceTimeoutRef.current);
-    if (autoplayTimeoutRef.current) window.clearTimeout(autoplayTimeoutRef.current);
-
-    let delay = 0;
-    const isFirst = firstPlayRef.current;
-  const needCadenceInitial = isFirst || causeNewKeyCenter || (autoplayMode && repeatCadence);
-
-    const playInitial = () => {
-      updateRandomNote({ play: true, keyOverride: causeNewKeyCenter ? keyOverride : undefined });
-      if (isFirst) firstPlayRef.current = false;
-      if (autoplayMode) {
-        const scheduleNext = () => {
-          if (!autoPlay) return;
-            const interval = AUTO_PLAY_INTERVAL[autoPlaySpeed];
-            autoplayTimeoutRef.current = window.setTimeout(() => {
-              if (repeatCadence) {
-                const cadDur = scheduleCadence() * 1000 + 350;
-                cadenceTimeoutRef.current = window.setTimeout(() => {
-                  updateRandomNote({ play: true });
-                  scheduleNext();
-                }, cadDur);
-              } else {
-                updateRandomNote({ play: true });
-                scheduleNext();
-              }
-            }, interval);
-        };
-        const initialInterval = AUTO_PLAY_INTERVAL[autoPlaySpeed] + delay;
-        autoplayTimeoutRef.current = window.setTimeout(scheduleNext, initialInterval);
-      }
-    };
-
-    if (needCadenceInitial) {
-  delay = scheduleCadence(keyOverride) * 1000 + 400;
-      cadenceTimeoutRef.current = window.setTimeout(playInitial, delay);
-    } else {
-      playInitial();
-    }
-  }, [initInstrument, scheduleCadence, autoPlay, autoPlaySpeed, repeatCadence, updateRandomNote]);
-
-  const stopPlayback = useCallback((reset?: boolean) => {
-    setIsPlaying(false);
-    if (cadenceTimeoutRef.current) window.clearTimeout(cadenceTimeoutRef.current);
-    if (autoplayTimeoutRef.current) window.clearTimeout(autoplayTimeoutRef.current);
-    if (reset) {
-      setCurrentNote(null);
-      setShowSolfege('');
-    }
-  }, []);
-
-  // Manual cadence trigger: plays cadence for current key. If autoplay active, replay current note after cadence then resume loop timing.
-  const triggerCadence = useCallback(async () => {
-    await initInstrument();
-  if (!instrumentLoaded) return;
-    // Clear any pending cadence-only timer
-    if (cadenceTimeoutRef.current) window.clearTimeout(cadenceTimeoutRef.current);
-    const wasAutoplay = autoPlay && isPlaying;
-    if (wasAutoplay && autoplayTimeoutRef.current) {
-      window.clearTimeout(autoplayTimeoutRef.current);
-    }
-    const durSec = scheduleCadence();
-    const extraMs = 350; // buffer after chord releases
-    cadenceTimeoutRef.current = window.setTimeout(() => {
-      if (currentNote != null) {
-        // Replay current note after cadence always
-        playNote(currentNote, 1.4);
-      }
-      if (wasAutoplay) {
-        const scheduleNext = () => {
-          if (!autoPlay) return;
-          const interval = AUTO_PLAY_INTERVAL[autoPlaySpeed];
-            autoplayTimeoutRef.current = window.setTimeout(() => {
-              if (repeatCadence) {
-                const cadDur = scheduleCadence() * 1000 + 350;
-                cadenceTimeoutRef.current = window.setTimeout(() => {
-                  updateRandomNote({ play: true });
-                  scheduleNext();
-                }, cadDur);
-              } else {
-                updateRandomNote({ play: true });
-                scheduleNext();
-              }
-            }, interval);
-        };
-        const interval = AUTO_PLAY_INTERVAL[autoPlaySpeed];
-        autoplayTimeoutRef.current = window.setTimeout(scheduleNext, interval);
-      }
-    }, durSec * 1000 + extraMs);
-  }, [initInstrument, autoPlay, isPlaying, scheduleCadence, currentNote, playNote, autoPlaySpeed, repeatCadence, updateRandomNote]);
+  const { isPlaying, startSequence, stopPlayback, triggerCadence } = useAutoplayCycle({
+    autoPlay,
+    repeatCadence,
+    autoPlaySpeed,
+    scheduleCadence,
+    updateRandomNote,
+    currentNote,
+    playNote,
+    instrumentLoaded,
+  });
 
   const newKeyCenter = useCallback(() => {
     const idx = Math.floor(Math.random() * keysCircle.length);
@@ -356,12 +269,7 @@ const App: React.FC = () => {
 
   // Immediate effect: when cadence speed changes during active cadence scheduling for next autoplay cycle, nothing to reschedule until next cycle.
   // When autoplay speed changes, restart autoplay timing if currently playing.
-  useEffect(() => {
-    if (isPlaying) {
-      // restart sequence timing but keep current note displayed
-      startSequence(false);
-    }
-  }, [autoPlaySpeed, cadenceSpeed, repeatCadence, startSequence, isPlaying]);
+  // cadenceSpeed changes only affect future scheduleCadence calls; restart handled by hook for repeatCadence/autoPlaySpeed
 
   // If note mode or range changes while not awaiting a cadence, pick a new note immediately (unless there is no note yet)
   useEffect(() => {
@@ -438,12 +346,12 @@ const App: React.FC = () => {
 
       <div className="card" style={{display:'flex', flexDirection:'column', gap:'0.6rem'}}>
         <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', alignItems:'center'}}>
-          <button onClick={()=>{ if (isPlaying) { stopPlayback(true); } else { startSequence(firstPlayRef.current); } }} disabled={loadingInstrument}>
+          <button onClick={()=>{ if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { startSequence(); } }} disabled={loadingInstrument}>
             {isPlaying ? '■ Stop' : '▶ Play'}
           </button>
           <button className="secondary" onClick={()=>triggerCadence()} disabled={currentNote==null}>Again</button>
           <button className="secondary" onClick={()=>newKeyCenter()}>New Key</button>
-          <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { setIsPlaying(false); } }} />Autoplay</label>
+          <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay</label>
           <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
         </div>
         <div className="row" style={{flexWrap:'wrap', rowGap:'0.5rem'}}>
