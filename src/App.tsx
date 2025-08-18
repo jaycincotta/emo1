@@ -162,6 +162,33 @@ const App: React.FC = () => {
     setTimeout(()=>{ try { g.disconnect(); } catch {} }, 500);
   }, []);
 
+  // Render a short beep via OfflineAudioContext then play it to ensure decode+play path works
+  const bufferBeep = useCallback(async () => {
+    try {
+      const sampleRate = 44100;
+      const dur = 0.35;
+      const offline = new OfflineAudioContext(1, sampleRate * dur, sampleRate);
+      const osc = offline.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      const gain = offline.createGain();
+      gain.gain.setValueAtTime(0.0001, 0);
+      gain.gain.exponentialRampToValueAtTime(0.8, 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, dur);
+      osc.connect(gain).connect(offline.destination);
+      osc.start(); osc.stop(dur);
+      const rendered = await offline.startRendering();
+      if (!audioCtxRef.current) return;
+      const ctx = audioCtxRef.current;
+      const src = ctx.createBufferSource();
+      src.buffer = rendered;
+      src.connect(ctx.destination);
+      src.start();
+    } catch (e) {
+      setDebugInfo(d => d + ' | bufferBeep err');
+    }
+  }, []);
+
   // Start a quiet repeating beep (alternating two frequencies) until confirmation
   const startBeepLoop = useCallback(() => {
     if (!audioCtxRef.current) return;
@@ -244,10 +271,46 @@ const App: React.FC = () => {
 
   const playHtmlBeep = useCallback(() => {
     try {
-      const a = new Audio('data:audio/wav;base64,UklGRkQAAABXQVZFZm10IBAAAAABAAEAIlYAABAAAAABAAgAZGF0YQAAAAA=');
+      // 440Hz ~250ms generated PCM wav (audible)
+      const a = new Audio('data:audio/wav;base64,UklGRl4AAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YU4AAAAA//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f');
       a.play().then(()=>setDebugInfo(d=>d+' | htmlAudio ok')).catch(()=>setDebugInfo(d=>d+' | htmlAudio err'));
     } catch {}
   }, []);
+
+  // Alternate aggressive unlock: recreate context, run multiple oscillators & buffer beeps, rapid resume loop
+  const altUnlock = useCallback(async () => {
+    try {
+      setUnlockAttempted(true);
+      if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
+      const Ctor: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctor) { setDebugInfo('No AudioContext available'); return; }
+      const ctx: AudioContext = new Ctor({ latencyHint:'interactive' });
+      audioCtxRef.current = ctx; setAudioCtx(ctx);
+      const resumeTry = async () => { if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} } };
+      for (let i=0;i<3;i++) { await resumeTry(); }
+      // stack three oscillators different freqs
+      [440,660,880].forEach((f,ix) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.frequency.value = f; o.type = 'sine';
+        g.gain.setValueAtTime(0.0001, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5 + ix*0.05);
+        o.connect(g).connect(ctx.destination);
+        o.start();
+        o.stop(ctx.currentTime + 0.55 + ix*0.05);
+        setTimeout(()=>{ try { g.disconnect(); } catch {} }, 900);
+      });
+      // also try buffer beep
+      bufferBeep();
+      // start beep loop
+      if (!beepLooping) startBeepLoop();
+      setAudioUnlocked(ctx.state === 'running');
+      initInstrument();
+    } catch (e) {
+      setDebugInfo('altUnlock error');
+    }
+  }, [bufferBeep, startBeepLoop, beepLooping, initInstrument]);
 
   const computeRoot = (key: string) => {
     const base = 60; // anchor at C4 octave
@@ -541,11 +604,17 @@ const App: React.FC = () => {
             {!heardConfirm && (
               <button onClick={() => { loudBeep(); }} style={{fontSize:'0.65rem'}}>Loud Beep</button>
             )}
+            {!heardConfirm && (
+              <button onClick={() => { bufferBeep(); }} style={{fontSize:'0.65rem'}}>Buffer Beep</button>
+            )}
+            {!heardConfirm && (
+              <button onClick={() => { altUnlock(); }} style={{fontSize:'0.65rem'}}>Alt Unlock</button>
+            )}
             <button onClick={hardResetAudio} style={{fontSize:'0.65rem'}}>Reset</button>
           </div>
           <div style={{marginTop:'0.6rem', fontSize:'0.55rem', opacity:0.7, maxWidth:360}}>
             <div>{debugInfo}</div>
-            <div>beep {beepLooping?'on':'off'} confirm {heardConfirm?'yes':'no'} ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} </div>
+            <div>beep {beepLooping?'on':'off'} confirm {heardConfirm?'yes':'no'} ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} sr {audioCtxRef.current?.sampleRate || '?'} </div>
           </div>
         </div>
       )}
