@@ -79,6 +79,9 @@ const App: React.FC = () => {
     try { return sessionStorage.getItem('earTrainerHeard') === '1'; } catch { return false; }
   });
   const [showDebug, setShowDebug] = useState(false);
+  // HTML <audio> priming (can help internal speaker routing on iOS when BT not present)
+  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [htmlPrimed, setHtmlPrimed] = useState(false);
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const primeAudio = useCallback(async () => {
@@ -196,7 +199,8 @@ const App: React.FC = () => {
 
   // Start a quiet repeating beep (alternating two frequencies) until confirmation
   const startBeepLoop = useCallback(() => {
-    if (!audioCtxRef.current) return;
+  if (!audioCtxRef.current) return;
+  if (!isMobileRef.current) return; // desktop: never start beep loop
     stopBeepLoop();
     const ctx = audioCtxRef.current;
     const gain = ctx.createGain();
@@ -251,15 +255,32 @@ const App: React.FC = () => {
     }
     // Immediate short ping at middle C (60)
     fallbackOsc(60, 0.25);
-    // Start repeating audible beeps until user confirms hearing
-    if (audioCtxRef.current?.state === 'running' && !beepLooping) {
-      startBeepLoop();
-      setDebugInfo(d=> d + ` | unlock gesture ctx=${audioCtxRef.current?.state}`);
-  setAudioUnlocked(true); // allow main UI once context is running; overlay persists until heardConfirm
+    // Also fire an HTML media element play attempt (some iOS internal speaker cases latch only after a media element play)
+    try {
+      if (htmlAudioRef.current) {
+        htmlAudioRef.current.currentTime = 0;
+        htmlAudioRef.current.play().then(()=>setHtmlPrimed(true)).catch(()=>{});
+      }
+    } catch {}
+    // Start repeating audible beeps until user confirms hearing (mobile only). Desktop: auto-confirm silently.
+    if (audioCtxRef.current?.state === 'running') {
+      if (isMobileRef.current) {
+        if (!beepLooping) {
+          startBeepLoop();
+          setDebugInfo(d=> d + ` | unlock gesture ctx=${audioCtxRef.current?.state}`);
+        }
+        setAudioUnlocked(true);
+      } else {
+        // Desktop
+        setAudioUnlocked(true);
+        if (!heardConfirm) setHeardConfirm(true);
+        // Ensure no stray loop
+        if (beepLooping) stopBeepLoop();
+      }
     }
     // Now asynchronously load instrument (don't block UI)
     initInstrument();
-  }, [fallbackOsc, initInstrument, startBeepLoop, beepLooping]);
+  }, [fallbackOsc, initInstrument, startBeepLoop, beepLooping, heardConfirm, stopBeepLoop]);
 
 
   const hardResetAudio = useCallback(() => {
@@ -284,40 +305,35 @@ const App: React.FC = () => {
     } catch {}
   }, []);
 
-  // Alternate aggressive unlock: recreate context, run multiple oscillators & buffer beeps, rapid resume loop
+  // Alternate aggressive unlock (mobile troubleshooting). Desktop just returns.
   const altUnlock = useCallback(async () => {
+    if (!isMobileRef.current) { if (!audioUnlocked) unlockAudio(); return; }
     try {
       setUnlockAttempted(true);
       if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
       const Ctor: any = (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (!Ctor) { setDebugInfo('No AudioContext available'); return; }
+      if (!Ctor) { setDebugInfo('No AudioContext'); return; }
       const ctx: AudioContext = new Ctor({ latencyHint:'interactive' });
       audioCtxRef.current = ctx; setAudioCtx(ctx);
-      const resumeTry = async () => { if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} } };
-      for (let i=0;i<3;i++) { await resumeTry(); }
-      // stack three oscillators different freqs
+      for (let i=0;i<3;i++) { if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} } }
       [440,660,880].forEach((f,ix) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
-        o.frequency.value = f; o.type = 'sine';
+        o.type='sine'; o.frequency.value=f;
         g.gain.setValueAtTime(0.0001, ctx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
         g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5 + ix*0.05);
         o.connect(g).connect(ctx.destination);
-        o.start();
-        o.stop(ctx.currentTime + 0.55 + ix*0.05);
+        o.start(); o.stop(ctx.currentTime + 0.55 + ix*0.05);
         setTimeout(()=>{ try { g.disconnect(); } catch {} }, 900);
       });
-      // also try buffer beep
       bufferBeep();
-      // start beep loop
       if (!beepLooping) startBeepLoop();
-      setAudioUnlocked(ctx.state === 'running');
-      initInstrument();
-    } catch (e) {
+      setAudioUnlocked(true);
+    } catch {
       setDebugInfo('altUnlock error');
     }
-  }, [bufferBeep, startBeepLoop, beepLooping, initInstrument]);
+  }, [audioUnlocked, bufferBeep, beepLooping, startBeepLoop, unlockAudio]);
 
   const computeRoot = (key: string) => {
     const base = 60; // anchor at C4 octave
@@ -573,12 +589,49 @@ const App: React.FC = () => {
     return () => { if (id) clearTimeout(id); };
   }, []);
 
+  // Lifecycle + route change listeners to aggressively resume / re-prime
+  useEffect(() => {
+    const resume = () => {
+      if (audioCtxRef.current?.state === 'suspended') {
+        audioCtxRef.current.resume().catch(()=>{});
+      }
+      if (htmlAudioRef.current && !htmlPrimed) {
+        htmlAudioRef.current.play().then(()=>setHtmlPrimed(true)).catch(()=>{});
+      }
+    };
+    const pageShow = () => resume();
+    const visibility = () => { if (document.visibilityState === 'visible') resume(); };
+    window.addEventListener('pageshow', pageShow);
+    document.addEventListener('visibilitychange', visibility);
+    // mediaDevices devicechange (not always supported on iOS) to re-prime after unplugging BT
+    try { navigator.mediaDevices?.addEventListener('devicechange', resume); } catch {}
+    return () => {
+      window.removeEventListener('pageshow', pageShow);
+      document.removeEventListener('visibilitychange', visibility);
+      try { navigator.mediaDevices?.removeEventListener('devicechange', resume); } catch {}
+    };
+  }, [htmlPrimed]);
+
+  // After confirmation + instrument load, ensure at least one piano note actually sounds (guard against route muted)
+  useEffect(() => {
+    if (heardConfirm && instrumentLoaded) {
+      // schedule a very soft root ping (Do) once
+      const root = computeRoot(keyCenterRef.current);
+      setTimeout(()=> safePlay(root, 0.4), 120);
+    }
+  }, [heardConfirm, instrumentLoaded, safePlay]);
+
   // Auto-stop beep loop once instrument loaded and user confirmed
   useEffect(() => {
     if (instrumentLoaded && heardConfirm && beepLooping) {
       stopBeepLoop();
     }
   }, [instrumentLoaded, heardConfirm, beepLooping, stopBeepLoop]);
+
+  // If not mobile, ensure beep loop never runs (safety in case of state carryover)
+  useEffect(() => {
+    if (!isMobileRef.current && beepLooping) stopBeepLoop();
+  }, [beepLooping, stopBeepLoop]);
 
   // Persist confirmation
   useEffect(() => {
@@ -601,6 +654,13 @@ const App: React.FC = () => {
 
   return (
     <div>
+      {/* Hidden html audio element for internal speaker priming (short base64 sine ~0.25s) */}
+      <audio
+        ref={htmlAudioRef}
+        style={{display:'none'}}
+        playsInline
+        preload="auto"
+        src="data:audio/wav;base64,UklGRl4AAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YU4AAAAA//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f" />
   {!heardConfirm && isMobileRef.current && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center', backdropFilter:'blur(2px)'}}>
           <h2 style={{margin:'0 0 0.75rem'}}>{audioUnlocked ? 'Confirm Sound' : 'Enable Audio'}</h2>
