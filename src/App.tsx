@@ -43,6 +43,8 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const instrumentRef = useRef<Player | null>(null);
   const [loadingInstrument, setLoadingInstrument] = useState(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [unlockAttempted, setUnlockAttempted] = useState(false);
 
   const [keyCenter, setKeyCenter] = useState<string>('C');
   const keyCenterRef = useRef<string>('C');
@@ -64,19 +66,38 @@ const App: React.FC = () => {
   const cadenceTimeoutRef = useRef<number | null>(null);
   const autoplayTimeoutRef = useRef<number | null>(null);
 
-  // Initialize audio / instrument lazily
+  // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const initInstrument = useCallback(async () => {
-    if (!audioCtxRef.current) {
-      const ctx = new AudioContext();
-      audioCtxRef.current = ctx;
-      setAudioCtx(ctx); // trigger rerender if needed
+    try {
+      if (!audioCtxRef.current) {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioCtxRef.current = ctx;
+        setAudioCtx(ctx); // trigger rerender if needed
+      }
+      if (audioCtxRef.current?.state === 'suspended') {
+        await audioCtxRef.current.resume().catch(()=>{});
+      }
+      if (audioCtxRef.current?.state === 'running') {
+        setAudioUnlocked(true);
+      }
+      if (instrumentRef.current) return;
+      setLoadingInstrument(true);
+      const piano = await Soundfont.instrument(audioCtxRef.current!, 'acoustic_grand_piano');
+      instrumentRef.current = piano;
+    } finally {
+      setLoadingInstrument(false);
     }
-    if (instrumentRef.current) return;
-    setLoadingInstrument(true);
-    const piano = await Soundfont.instrument(audioCtxRef.current!, 'acoustic_grand_piano');
-    instrumentRef.current = piano;
-    setLoadingInstrument(false);
   }, []);
+
+  const unlockAudio = useCallback(async () => {
+    setUnlockAttempted(true);
+    await initInstrument();
+    // simple feedback: play an ultra-short quiet note (middle C) if unlocked to reassure user
+    if (audioCtxRef.current?.state === 'running' && instrumentRef.current) {
+      setAudioUnlocked(true);
+      try { instrumentRef.current.play('C4', (audioCtxRef.current.currentTime || 0) + 0.02, { duration: 0.2 }); } catch {}
+    }
+  }, [initInstrument]);
 
   const computeRoot = (key: string) => {
     const base = 60; // anchor at C4 octave
@@ -93,6 +114,7 @@ const App: React.FC = () => {
     if (ctx && ctx.state !== 'running') {
       ctx.resume().catch(()=>{});
     }
+  if (ctx?.state === 'running' && !audioUnlocked) setAudioUnlocked(true);
     const when = (ctx?.currentTime || 0) + 0.02;
     instrumentRef.current.play(midiToName(midi), when, { duration });
   }, []);
@@ -285,6 +307,14 @@ const App: React.FC = () => {
     }
   }, [noteMode, lowPitch, highPitch, chooseRandomNote]);
 
+  // Attempt passive unlock on first pointer interaction (won't show errors if blocked)
+  useEffect(() => {
+    if (audioUnlocked) return;
+    const handler = () => { unlockAudio(); document.removeEventListener('pointerdown', handler); };
+    document.addEventListener('pointerdown', handler, { once: true });
+    return () => document.removeEventListener('pointerdown', handler);
+  }, [audioUnlocked, unlockAudio]);
+
   // Recompute solfege if key changes while a note is displayed (e.g., manual key switch without immediate playback)
   useEffect(()=> { keyCenterRef.current = keyCenter; }, [keyCenter]);
   useEffect(() => {
@@ -299,6 +329,17 @@ const App: React.FC = () => {
 
   return (
     <div>
+      {!audioUnlocked && (
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.72)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center'}}>
+          <h2 style={{margin:'0 0 1rem'}}>Enable Audio</h2>
+          <p style={{maxWidth:480, fontSize:'0.9rem', lineHeight:1.4}}>
+            Mobile browsers (especially iOS Safari) require a tap before sound can play. Tap the button below once, then use Play or Cadence. If your iPhone is in silent mode, switch the hardware mute off.
+          </p>
+          <button onClick={unlockAudio} disabled={loadingInstrument} style={{fontSize:'1.1rem', padding:'0.75rem 1.25rem', marginTop:'1rem'}}>
+            {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
+          </button>
+        </div>
+      )}
       <h1>Solfege Ear Trainer</h1>
       <div className="card" style={{display:'flex', flexDirection:'column', gap:'0.25rem'}}>
         <div className="key-name">Key Center: <strong>{keyDisplay}</strong></div>
