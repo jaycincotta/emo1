@@ -1,0 +1,5 @@
+.overlay { position:fixed; inset:0; background:rgba(0,0,0,0.82); color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:1000; padding:1.5rem; text-align:center; backdrop-filter:blur(2px); }
+.title { margin:0 0 0.75rem; }
+.paragraph { max-width:520px; font-size:0.85rem; line-height:1.4; }
+.buttonRow { display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:center; margin-top:0.4rem; }
+.debug { margin-top:0.6rem; font-size:0.55rem; opacity:0.7; max-width:360px; text-align:left; }

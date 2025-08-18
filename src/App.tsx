@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import styles from './App.module.css';
 import FullKeyboardRange from './components/FullKeyboardRange';
 import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 import { AudioService } from './audio/AudioService';
@@ -338,25 +339,25 @@ const App: React.FC = () => {
         onReset={hardResetWrapper}
       />
       <h1>Solfege Ear Trainer</h1>
-      <div className="card" style={{display:'flex', flexDirection:'column', gap:'0.25rem'}}>
+      <div className={`card ${styles.cardColumn}`}>
         <div className="key-name">Key Center: <strong>{keyDisplay}</strong></div>
         <div className="solfege">{showSolfege || '—'}</div>
-        <div className="muted" style={{marginTop:'.25rem'}}>{currentNote!=null ? midiToName(currentNote) : ''}</div>
+        <div className={`muted ${styles.muted}`}>{currentNote!=null ? midiToName(currentNote) : ''}</div>
       </div>
 
-      <div className="card" style={{display:'flex', flexDirection:'column', gap:'0.6rem'}}>
-        <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', alignItems:'center'}}>
+      <div className={`card ${styles.controlsCard}`}>
+        <div className={styles.topControls}>
           <button onClick={()=>{ if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { startSequence(); } }} disabled={loadingInstrument}>
             {isPlaying ? '■ Stop' : '▶ Play'}
           </button>
           <button className="secondary" onClick={()=>triggerCadence()} disabled={currentNote==null}>Again</button>
           <button className="secondary" onClick={()=>newKeyCenter()}>New Key</button>
-          <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay</label>
-          <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
+          <label className={styles.inlineCheck}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay</label>
+          <label className={styles.inlineCheck}><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
         </div>
-        <div className="row" style={{flexWrap:'wrap', rowGap:'0.5rem'}}>
+        <div className={`row ${styles.rowWrap}`}>
           <div className="stack">
-            <label style={{display:'flex', flexDirection:'column'}}>
+            <label className={styles.stackLabel}>
               <span>Note set</span>
               <select value={noteMode} onChange={e=>setNoteMode(e.target.value as any)}>
                 <option value="diatonic">Diatonic</option>
@@ -366,7 +367,7 @@ const App: React.FC = () => {
             </label>
           </div>
           <div className="stack">
-            <label style={{display:'flex', flexDirection:'column'}}>
+            <label className={styles.stackLabel}>
               <span>Cadence speed</span>
               <select value={cadenceSpeed} onChange={e=>setCadenceSpeed(e.target.value as any)}>
                 <option value="slow">slow</option>
@@ -376,7 +377,7 @@ const App: React.FC = () => {
             </label>
           </div>
           <div className="stack">
-            <label style={{display:'flex', flexDirection:'column'}}>
+            <label className={styles.stackLabel}>
               <span>Autoplay speed</span>
               <select value={autoPlaySpeed} onChange={e=>setAutoPlaySpeed(e.target.value as any)}>
                 <option value="slow">slow</option>
@@ -387,14 +388,14 @@ const App: React.FC = () => {
           </div>
         </div>
         <div>
-          <fieldset style={{margin:0}}>
+          <fieldset className={styles.fieldset}>
             <legend>Pitch Range (Full 88 Keys)</legend>
             <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} onChange={(l,h)=>{setLowPitch(l); setHighPitch(h);}} />
           </fieldset>
         </div>
       </div>
 
-      <div className="card" style={{fontSize:'.75rem', lineHeight:1.4}}>
+      <div className={`card ${styles.instructions}`}>
         <strong>Instructions:</strong> Press Play to hear the cadence then a random scale degree. Use the options to tailor your practice. Solfege uses movable-Do with chromatic syllables (Ra, Me, Fi, Le, Te).
       </div>
 

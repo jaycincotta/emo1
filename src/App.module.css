@@ -1,0 +1,10 @@
+.cardColumn { display:flex; flex-direction:column; gap:0.25rem; }
+.muted { margin-top:.25rem; }
+.controlsCard { display:flex; flex-direction:column; gap:0.6rem; }
+.topControls { display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; }
+.rowWrap { display:flex; flex-wrap:wrap; row-gap:0.5rem; }
+.stack label { display:flex; flex-direction:column; }
+.instructions { font-size:.75rem; line-height:1.4; }
+.fieldset { margin:0; }
+.inlineCheck { font-size:.7rem; display:flex; align-items:center; gap:.25rem; }
+.stackLabel { display:flex; flex-direction:column; }
