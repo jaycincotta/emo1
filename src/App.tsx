@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Soundfont, { Player } from 'soundfont-player'; // (legacy loading retained temporarily)
 import FullKeyboardRange from './components/FullKeyboardRange';
 import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 import { AudioService } from './audio/AudioService';
@@ -7,9 +6,8 @@ import { AudioService } from './audio/AudioService';
 const App: React.FC = () => {
   const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null); // state kept for potential UI/debug
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const instrumentRef = useRef<Player | null>(null);
-  const [loadingInstrument, setLoadingInstrument] = useState(false);
-  const [instrumentLoaded, setInstrumentLoaded] = useState(false);
+  const [loadingInstrument, setLoadingInstrument] = useState(false); // mirrors AudioService.isLoading
+  const [instrumentLoaded, setInstrumentLoaded] = useState(false); // mirrors AudioService.isLoaded
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [unlockAttempted, setUnlockAttempted] = useState(false);
   const initialIsMobile = typeof navigator !== 'undefined' && /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent);
@@ -54,13 +52,11 @@ const App: React.FC = () => {
     if (!audioCtxRef.current) return;
     try {
       const ctx = audioCtxRef.current;
-      // 1-frame buffer trick
       const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
       const src = ctx.createBufferSource();
       src.buffer = buffer;
       src.connect(ctx.destination);
       src.start(0);
-      // Low gain short oscillator (inaudible) to fully unlock
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       gain.gain.value = 0.0001;
@@ -70,54 +66,31 @@ const App: React.FC = () => {
     } catch {}
   }, []);
 
+  const audioServiceRef = useRef<AudioService | null>(null);
+  if (!audioServiceRef.current) audioServiceRef.current = new AudioService();
+
   const initInstrument = useCallback(async () => {
+    const service = audioServiceRef.current!;
     try {
-      if (!audioCtxRef.current) {
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioCtxRef.current = ctx;
-        setAudioCtx(ctx); // trigger rerender if needed
-      }
-      if (audioCtxRef.current?.state === 'suspended') {
-        try { await audioCtxRef.current.resume(); } catch {}
-      }
+      const ctx = service.ensureContext();
+      audioCtxRef.current = ctx; // keep legacy refs in sync
+      setAudioCtx(ctx);
+      if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
       await primeAudio();
-      if (instrumentRef.current) return;
+      if (service.isLoaded) return;
       setLoadingInstrument(true);
-  setDebugInfo(`ctxState=${audioCtxRef.current?.state}; unlocked=${audioUnlocked}`);
-      const piano = await Soundfont.instrument(audioCtxRef.current!, 'acoustic_grand_piano');
-      instrumentRef.current = piano;
-      // Only mark unlocked automatically if a prior manual unlock occurred
-      if (!audioUnlocked) {
-        setAudioUnlocked(true);
-      }
-  setInstrumentLoaded(true);
+      setDebugInfo(`ctxState=${ctx.state}; unlocked=${audioUnlocked}`);
+      await service.loadInstrument();
+      if (!audioUnlocked) setAudioUnlocked(true);
+      setInstrumentLoaded(true);
     } finally {
       setLoadingInstrument(false);
     }
-  }, [primeAudio]);
-
-  // Fallback oscillator (simple sine with quick envelope) used if instrument not loaded yet
-  const fallbackOsc = useCallback((midi: number, duration = 0.6) => {
-    if (!audioCtxRef.current) return;
-    const ctx = audioCtxRef.current;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const freq = 440 * Math.pow(2, (midi - 69) / 12);
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + duration + 0.02);
-  }, []);
+  }, [primeAudio, audioUnlocked]);
 
   const safePlay = useCallback((midi: number, duration = 1) => {
-    if (instrumentRef.current) {
-      try { instrumentRef.current.play(midiToName(midi), (audioCtxRef.current?.currentTime || 0) + 0.01, { duration }); return; } catch {}
-    }
-    fallbackOsc(midi, Math.min(duration, 0.9));
-  }, [fallbackOsc]);
+    audioServiceRef.current?.playNote(midi, duration);
+  }, []);
 
   // Emergency loud single beep helper (square wave burst) to verify output path
   const loudBeep = useCallback(() => {
@@ -220,7 +193,7 @@ const App: React.FC = () => {
       try { await audioCtxRef.current.resume(); } catch {}
     }
     // Immediate short ping at middle C (60)
-    fallbackOsc(60, 0.25);
+  audioServiceRef.current?.playNote(60, 0.25);
     // Also fire an HTML media element play attempt (some iOS internal speaker cases latch only after a media element play)
     try {
       if (htmlAudioRef.current) {
@@ -246,18 +219,17 @@ const App: React.FC = () => {
     }
     // Now asynchronously load instrument (don't block UI)
     initInstrument();
-  }, [fallbackOsc, initInstrument, startBeepLoop, beepLooping, heardConfirm, stopBeepLoop]);
+  }, [initInstrument, startBeepLoop, beepLooping, heardConfirm, stopBeepLoop]);
 
 
   const hardResetAudio = useCallback(() => {
     try {
-      instrumentRef.current = null;
       if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
       audioCtxRef.current = null;
       setAudioCtx(null);
       setAudioUnlocked(false);
       setDebugInfo('AudioContext reset');
-  stopBeepLoop();
+	stopBeepLoop();
   setHeardConfirm(false);
   try { sessionStorage.removeItem('earTrainerHeard'); } catch {}
     } catch {}
@@ -273,7 +245,7 @@ const App: React.FC = () => {
 
   // Alternate aggressive unlock (mobile troubleshooting). Desktop just returns.
   const altUnlock = useCallback(async () => {
-    if (!isMobileRef.current) { if (!audioUnlocked) unlockAudio(); return; }
+  if (!isMobileRef.current) { if (!audioUnlocked) unlockAudio(); return; }
     try {
       setUnlockAttempted(true);
       if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
@@ -314,32 +286,10 @@ const App: React.FC = () => {
     setDebugInfo(`playNote -> ctx=${ctx?.state}`);
   }, [safePlay, audioUnlocked]);
 
-  // Transitional: use local scheduling first; prefer service when loaded
-  const audioServiceRef = useRef<AudioService | null>(null);
-  if (!audioServiceRef.current) audioServiceRef.current = new AudioService();
-
   const scheduleCadence = useCallback((keyOverride?: string): number => {
-    // If service instrument loaded mirror existing instrumentRef
-    if (instrumentRef.current && audioCtxRef.current) {
-      // Use existing inline logic (kept for parity) until service fully owns load
-      const root = computeRoot(keyOverride ?? keyCenterRef.current);
-      const tempo = TEMPO_VALUES[cadenceSpeed];
-      const I = [root, root+4, root+7];
-      const IV = [root+5, root+9, root+12];
-      const V = [root+7, root+11, root+14];
-      let rel = 0;
-      const chordDuration = 0.9 * tempo;
-      const chordGap = 0.1 * tempo;
-      const seq = [I, IV, V, I];
-      const ctx = audioCtxRef.current;
-      const baseTime = ctx!.currentTime + 0.05;
-      seq.forEach(ch => {
-        ch.forEach(n => instrumentRef.current!.play(midiToName(n), baseTime + rel, { duration: chordDuration }));
-        rel += chordDuration + chordGap;
-      });
-      return rel;
-    }
-    return 0;
+    const key = keyOverride ?? keyCenterRef.current;
+    const result = audioServiceRef.current?.scheduleCadence(key, cadenceSpeed);
+    return result?.lengthSec || 0;
   }, [cadenceSpeed]);
 
   const chooseRandomNote = useCallback(() => {
@@ -430,7 +380,7 @@ const App: React.FC = () => {
   // Manual cadence trigger: plays cadence for current key. If autoplay active, replay current note after cadence then resume loop timing.
   const triggerCadence = useCallback(async () => {
     await initInstrument();
-    if (!instrumentRef.current) return;
+  if (!instrumentLoaded) return;
     // Clear any pending cadence-only timer
     if (cadenceTimeoutRef.current) window.clearTimeout(cadenceTimeoutRef.current);
     const wasAutoplay = autoPlay && isPlaying;
