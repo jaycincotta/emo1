@@ -1,42 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Soundfont, { Player } from 'soundfont-player';
 import FullKeyboardRange from './components/FullKeyboardRange';
-
-// MIDI helpers
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
-const SOLFEGE_MAP: Record<number, { diatonic: boolean; syllable: string }> = {
-  0: { diatonic: true, syllable: 'Do' },
-  1: { diatonic: false, syllable: 'Ra' },
-  2: { diatonic: true, syllable: 'Re' },
-  3: { diatonic: false, syllable: 'Me' },
-  4: { diatonic: true, syllable: 'Mi' },
-  5: { diatonic: true, syllable: 'Fa' },
-  6: { diatonic: false, syllable: 'Fi' },
-  7: { diatonic: true, syllable: 'Sol' },
-  8: { diatonic: false, syllable: 'Le' },
-  9: { diatonic: true, syllable: 'La' },
- 10: { diatonic: false, syllable: 'Te' },
- 11: { diatonic: true, syllable: 'Ti' },
-};
-
-const TEMPO_VALUES: Record<'slow' | 'medium' | 'fast', number> = { slow: 0.9, medium: 0.6, fast: 0.4 };
-const AUTO_PLAY_INTERVAL: Record<'slow' | 'medium' | 'fast', number> = { slow: 4000, medium: 3000, fast: 1800 };
-
-function midiToName(midi: number) {
-  const name = NOTE_NAMES[midi % 12];
-  const octave = Math.floor(midi / 12) - 1;
-  return `${name}${octave}`;
-}
-
-const DEFAULT_LOW = 21; // A0 full range start
-const DEFAULT_HIGH = 108; // C8 full range end
-
-const keysCircle = ['C','G','D','A','E','B','F#','Db','Ab','Eb','Bb','F'] as const;
-
-// Explicit mapping for major key tonics to semitone (C = 0)
-const KEY_TO_SEMITONE: Record<string, number> = {
-  C:0, G:7, D:2, A:9, E:4, B:11, 'F#':6, Db:1, Ab:8, Eb:3, Bb:10, F:5
-};
+import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 
 const App: React.FC = () => {
   const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null); // state kept for potential UI/debug
@@ -335,13 +300,6 @@ const App: React.FC = () => {
     }
   }, [audioUnlocked, bufferBeep, beepLooping, startBeepLoop, unlockAudio]);
 
-  const computeRoot = (key: string) => {
-    const base = 60; // anchor at C4 octave
-    const baseSemitone = base % 12;
-    const semitone = KEY_TO_SEMITONE[key] ?? 0;
-    const offset = (semitone - baseSemitone + 12) % 12;
-    return base + offset;
-  };
   const getKeyRootMidi = () => computeRoot(keyCenterRef.current);
 
   const playNote = useCallback((midi: number, duration = 1) => {
@@ -482,31 +440,32 @@ const App: React.FC = () => {
     }
     const durSec = scheduleCadence();
     const extraMs = 350; // buffer after chord releases
-    if (wasAutoplay && currentNote != null) {
-      cadenceTimeoutRef.current = window.setTimeout(() => {
-        // Replay current note (same syllable) then schedule next loop
+    cadenceTimeoutRef.current = window.setTimeout(() => {
+      if (currentNote != null) {
+        // Replay current note after cadence always
         playNote(currentNote, 1.4);
+      }
+      if (wasAutoplay) {
         const scheduleNext = () => {
           if (!autoPlay) return;
           const interval = AUTO_PLAY_INTERVAL[autoPlaySpeed];
-          autoplayTimeoutRef.current = window.setTimeout(() => {
-            if (repeatCadence) {
-              const cadDur = scheduleCadence() * 1000 + 350;
-              cadenceTimeoutRef.current = window.setTimeout(() => {
+            autoplayTimeoutRef.current = window.setTimeout(() => {
+              if (repeatCadence) {
+                const cadDur = scheduleCadence() * 1000 + 350;
+                cadenceTimeoutRef.current = window.setTimeout(() => {
+                  updateRandomNote({ play: true });
+                  scheduleNext();
+                }, cadDur);
+              } else {
                 updateRandomNote({ play: true });
                 scheduleNext();
-              }, cadDur);
-            } else {
-              updateRandomNote({ play: true });
-              scheduleNext();
-            }
-          }, interval);
+              }
+            }, interval);
         };
-        // Start next cycle after normal interval from this repeated note
         const interval = AUTO_PLAY_INTERVAL[autoPlaySpeed];
         autoplayTimeoutRef.current = window.setTimeout(scheduleNext, interval);
-      }, durSec * 1000 + extraMs);
-    }
+      }
+    }, durSec * 1000 + extraMs);
   }, [initInstrument, autoPlay, isPlaying, scheduleCadence, currentNote, playNote, autoPlaySpeed, repeatCadence, updateRandomNote]);
 
   const newKeyCenter = useCallback(() => {
@@ -702,7 +661,7 @@ const App: React.FC = () => {
           <button onClick={()=>{ if (isPlaying) { stopPlayback(true); } else { startSequence(firstPlayRef.current); } }} disabled={loadingInstrument}>
             {isPlaying ? '■ Stop' : '▶ Play'}
           </button>
-          <button className="secondary" onClick={()=>triggerCadence()}>Cadence</button>
+          <button className="secondary" onClick={()=>triggerCadence()} disabled={currentNote==null}>Again</button>
           <button className="secondary" onClick={()=>newKeyCenter()}>New Key</button>
           <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { setIsPlaying(false); } }} />Autoplay</label>
           <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
