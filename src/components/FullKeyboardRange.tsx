@@ -83,7 +83,9 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
 
   // Visual dimensions: white key length (height in our horizontal layout) and black key length.
   // Empirically, real acoustic pianos expose black keys at roughly 60-64% of the visible white key length.
-  const whiteH = Math.round(whiteW * 4.0); // tuned for on-screen proportions
+  // Slightly shorter keys in cramped landscape to save vertical pixels.
+  const landscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight;
+  const whiteH = Math.round(whiteW * (landscape ? 3.4 : 4.0)); // tuned for on-screen proportions
   const BLACK_LEN_RATIO = 0.52; // adjustable single source of truth
   const blackH = Math.round(whiteH * BLACK_LEN_RATIO);
 

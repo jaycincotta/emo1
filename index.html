@@ -59,6 +59,15 @@
   .full-piano-scroll::-webkit-scrollbar-track { background:#11161a; }
   .full-piano-scroll::-webkit-scrollbar-thumb { background:#374151; border-radius:6px; }
   .full-piano-scroll::-webkit-scrollbar-thumb:hover { background:#4b5563; }
+  /* Compact landscape (small-height) tweaks to eliminate scrolling */
+  @media (orientation:landscape) and (max-height:520px){
+    #root { padding:.5rem .75rem 1.1rem; }
+    .card { padding:.55rem .75rem .7rem; margin-bottom:.55rem; }
+    .card .solfege { font-size: clamp(2.2rem, 6vw, 3.2rem); }
+    button { padding:.45rem .7rem; }
+    .full-piano-wrapper { margin:.25rem 0 .4rem; }
+    .instructions { display:none !important; }
+  }
     </style>
   </head>
   <body>
