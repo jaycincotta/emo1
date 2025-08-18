@@ -145,30 +145,54 @@ const App: React.FC = () => {
     fallbackOsc(midi, Math.min(duration, 0.9));
   }, [fallbackOsc]);
 
+  // Emergency loud single beep helper (square wave burst) to verify output path
+  const loudBeep = useCallback(() => {
+    if (!audioCtxRef.current) return;
+    const ctx = audioCtxRef.current;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = 1000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+    osc.connect(g).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.42);
+    setTimeout(()=>{ try { g.disconnect(); } catch {} }, 500);
+  }, []);
+
   // Start a quiet repeating beep (alternating two frequencies) until confirmation
   const startBeepLoop = useCallback(() => {
     if (!audioCtxRef.current) return;
     stopBeepLoop();
     const ctx = audioCtxRef.current;
     const gain = ctx.createGain();
-    gain.gain.value = 0.08; // soft
+    gain.gain.value = 0.15; // start slightly louder
     gain.connect(ctx.destination);
     beepGainRef.current = gain;
     let flip = false;
+    let count = 0;
     const playOne = () => {
       if (!audioCtxRef.current || !beepGainRef.current) return;
       const o = ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.value = flip ? 880 : 660; // two pitches to be noticeable
+      o.type = 'square'; // brighter
+      o.frequency.value = flip ? 1046.5 : 880; // C6 / A5 for cut-through
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(1, ctx.currentTime + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+      g.gain.exponentialRampToValueAtTime(0.9, ctx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
       o.connect(g).connect(beepGainRef.current!);
       o.start();
       o.stop(ctx.currentTime + 0.32);
       setTimeout(()=>{ try { g.disconnect(); } catch {} }, 400);
       flip = !flip;
+      count++;
+      // Every 4 beeps, if user still hasn't confirmed, raise master gain a bit (cap)
+      if (count % 4 === 0 && beepGainRef.current) {
+        const current = beepGainRef.current.gain.value;
+        if (current < 0.4) beepGainRef.current.gain.setValueAtTime(Math.min(0.4, current + 0.05), ctx.currentTime);
+      }
     };
     playOne();
     beepIntervalRef.current = window.setInterval(playOne, 600);
@@ -513,6 +537,9 @@ const App: React.FC = () => {
             )}
             {!heardConfirm && (
               <button onClick={() => { playHtmlBeep(); }} style={{fontSize:'0.65rem'}}>HTML Beep</button>
+            )}
+            {!heardConfirm && (
+              <button onClick={() => { loudBeep(); }} style={{fontSize:'0.65rem'}}>Loud Beep</button>
             )}
             <button onClick={hardResetAudio} style={{fontSize:'0.65rem'}}>Reset</button>
           </div>
