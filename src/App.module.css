@@ -35,3 +35,8 @@
 .helpSections strong { color:#fff; }
 .helpFooter { margin-top:1rem; font-size:.65rem; opacity:.65; }
 .dimmed { filter:blur(2px) brightness(.6); pointer-events:none; }
+/* Hide title in constrained landscape to reduce vertical scroll */
+.appHeader { margin:0 0 .5rem; }
+@media (orientation:landscape) and (max-height:520px){
+	.appHeader { display:none; }
+}

@@ -261,7 +261,7 @@ const App: React.FC = () => {
                 onHeard={() => { setHeardConfirm(true); stopBeepLoop(); setAudioUnlocked(true); }}
                 onReset={hardResetWrapper}
             />
-            <h1>Solfege Ear Trainer</h1>
+            <h1 className={styles.appHeader}>Solfege Ear Trainer</h1>
             <div className={`card ${styles.cardColumn}`}>
                 <div className="key-name">Key Center: <strong>{keyDisplay}</strong></div>
                 <div className="solfege">{showSolfege || '—'}</div>
