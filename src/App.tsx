@@ -51,6 +51,8 @@ const App: React.FC = () => {
   const [highPitch, setHighPitch] = useState(DEFAULT_HIGH);
   const [cadenceSpeed, setCadenceSpeed] = useState<'slow'|'medium'|'fast'>('medium');
   const [autoPlaySpeed, setAutoPlaySpeed] = useState<'slow'|'medium'|'fast'>('medium');
+  const [showInstructions, setShowInstructions] = useState(()=>{ try { return sessionStorage.getItem('etHideInstr')? false : true; } catch { return true; } });
+  const [showHelpModal, setShowHelpModal] = useState(false);
   // removed unused states: isPlayingExternal, htmlPrimed (debug remnants)
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
@@ -275,14 +277,20 @@ const App: React.FC = () => {
           </button>
           <button className="secondary" onClick={()=>triggerCadence()} disabled={currentNote==null}>Again</button>
           <button className="secondary" onClick={()=>newKeyCenter()}>New Key</button>
-          <label className={styles.inlineCheck}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay</label>
-          <label className={styles.inlineCheck}><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
+          <div className={styles.prominentToggles}>
+            <label className={styles.prominentCheck}>
+              <input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay
+            </label>
+            <label className={styles.prominentCheck}>
+              <input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence
+            </label>
+          </div>
         </div>
   <div className={`row ${styles.rowWrap}`}>
           <div className="stack">
             <label className={styles.stackLabel}>
               <span>Note set</span>
-              <select value={noteMode} onChange={e=>setNoteMode(e.target.value as any)}>
+              <select className={styles.bigSelect} value={noteMode} onChange={e=>setNoteMode(e.target.value as any)}>
                 <option value="diatonic">Diatonic</option>
                 <option value="non">Non-diatonic</option>
                 <option value="chromatic">Chromatic</option>
@@ -292,7 +300,7 @@ const App: React.FC = () => {
           <div className="stack">
             <label className={styles.stackLabel}>
               <span>Cadence speed</span>
-              <select value={cadenceSpeed} onChange={e=>setCadenceSpeed(e.target.value as any)}>
+              <select className={styles.bigSelect} value={cadenceSpeed} onChange={e=>setCadenceSpeed(e.target.value as any)}>
                 <option value="slow">slow</option>
                 <option value="medium">medium</option>
                 <option value="fast">fast</option>
@@ -302,7 +310,7 @@ const App: React.FC = () => {
           <div className="stack">
             <label className={styles.stackLabel}>
               <span>Autoplay speed</span>
-              <select value={autoPlaySpeed} onChange={e=>setAutoPlaySpeed(e.target.value as any)}>
+              <select className={styles.bigSelect} value={autoPlaySpeed} onChange={e=>setAutoPlaySpeed(e.target.value as any)}>
                 <option value="slow">slow</option>
                 <option value="medium">medium</option>
                 <option value="fast">fast</option>
@@ -311,12 +319,38 @@ const App: React.FC = () => {
           </div>
         </div>
       </div>
+      {showInstructions && (
+        <div className={`card ${styles.instructions}`}>
+          <div className={styles.instructionsDismiss}>
+            <div>
+              <strong>Instructions:</strong> Press Play to hear the cadence then a random scale degree. Use the options to tailor your practice. Solfege uses movable-Do with chromatic syllables (Ra, Me, Fi, Le, Te).
+            </div>
+            <button onClick={()=>{ setShowInstructions(false); try { sessionStorage.setItem('etHideInstr','1'); } catch {} }}>hide</button>
+          </div>
+        </div>
+      )}
 
-      <div className={`card ${styles.instructions}`}>
-        <strong>Instructions:</strong> Press Play to hear the cadence then a random scale degree. Use the options to tailor your practice. Solfege uses movable-Do with chromatic syllables (Ra, Me, Fi, Le, Te).
-      </div>
+      {/* Floating help button */}
+      <button aria-label="Help" className={styles.helpButton} onClick={()=>setShowHelpModal(true)}>?</button>
+      {showHelpModal && (
+        <div className={styles.helpModalBackdrop} role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+          <div className={styles.helpModal}>
+            <button aria-label="Close" className={styles.helpClose} onClick={()=>setShowHelpModal(false)}>×</button>
+            <h2 id="helpTitle">Quick Tips</h2>
+            <div className={styles.helpSections}>
+              <div><strong>Play</strong>: Plays a cadence (first time or new key) then a random note in range.</div>
+              <div><strong>Autoplay</strong>: Continuously drills random notes. Turn off for manual single-note practice.</div>
+              <div><strong>Repeat cadence</strong>: Keeps reinforcing tonic between autoplay notes. Disable to hear bare tones.</div>
+              <div><strong>Range</strong>: Tap new low/high ends directly on the keyboard.</div>
+              <div><strong>Note set</strong>: Diatonic (scale tones), Non-diatonic (chromatic neighbors), Chromatic (all 12).</div>
+              <div><strong>Speeds</strong>: Cadence speed = cadence pacing; Autoplay speed = delay between drills.</div>
+            </div>
+            <div className={styles.helpFooter}>Movable-Do solfege; chromatic syllables: Ra Me Fi Le Te. © 2025</div>
+          </div>
+        </div>
+      )}
 
-      <div className="footer">Built with Soundfont piano. First interaction may require enabling audio (browser gesture). © 2025</div>
+      {/* <div className="footer">Built with Soundfont piano. First interaction may require enabling audio (browser gesture). © 2025</div> */}
     </div>
   );
 };
