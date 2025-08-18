@@ -2,16 +2,37 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import FullKeyboardRange from './components/FullKeyboardRange';
 import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 import { AudioService } from './audio/AudioService';
+import { useAudioUnlock } from './hooks/useAudioUnlock';
 
 const App: React.FC = () => {
   const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null); // state kept for potential UI/debug
   const audioCtxRef = useRef<AudioContext | null>(null);
   const [loadingInstrument, setLoadingInstrument] = useState(false); // mirrors AudioService.isLoading
   const [instrumentLoaded, setInstrumentLoaded] = useState(false); // mirrors AudioService.isLoaded
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [unlockAttempted, setUnlockAttempted] = useState(false);
-  const initialIsMobile = typeof navigator !== 'undefined' && /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent);
-  const isMobileRef = useRef<boolean>(initialIsMobile);
+  // Audio unlock + beep loop handled via custom hook
+  const {
+    audioUnlocked,
+    setAudioUnlocked,
+    unlockAttempted,
+  setUnlockAttempted,
+  // add missing setter for altUnlock usage
+  // we expose unlockAttempted but not setter originally; replicate local behavior by tracking attempt via wrapper state if needed
+    heardConfirm,
+    setHeardConfirm,
+    showDebug,
+    setShowDebug,
+    debugInfo,
+    setDebugInfo,
+    beepLooping,
+    ctxTime,
+    ctxProgressing,
+    htmlAudioRef,
+    isMobile,
+    unlockAudio,
+    startBeepLoop,
+    stopBeepLoop,
+  hardResetAudio
+  } = useAudioUnlock({ audioCtxRef, instrumentLoaded, onReset: () => { /* instrument handled via service */ } });
 
   const [keyCenter, setKeyCenter] = useState<string>('C');
   const keyCenterRef = useRef<string>('C');
@@ -32,20 +53,7 @@ const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const cadenceTimeoutRef = useRef<number | null>(null);
   const autoplayTimeoutRef = useRef<number | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string>('');
-  const [ctxTime, setCtxTime] = useState<number>(0);
-  const [ctxProgressing, setCtxProgressing] = useState<boolean | null>(null);
-  // Beep loop + confirmation for robust iOS unlock
-  const [beepLooping, setBeepLooping] = useState(false);
-  const beepIntervalRef = useRef<number | null>(null);
-  const beepGainRef = useRef<GainNode | null>(null);
-  const [heardConfirm, setHeardConfirm] = useState<boolean>(() => {
-    try { return sessionStorage.getItem('earTrainerHeard') === '1'; } catch { return false; }
-  });
-  const [showDebug, setShowDebug] = useState(false);
-  // HTML <audio> priming (can help internal speaker routing on iOS when BT not present)
-  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [htmlPrimed, setHtmlPrimed] = useState(false);
+  const [htmlPrimed, setHtmlPrimed] = useState(false); // local tracking still used for post-load soft ping
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const primeAudio = useCallback(async () => {
@@ -137,103 +145,17 @@ const App: React.FC = () => {
   }, []);
 
   // Start a quiet repeating beep (alternating two frequencies) until confirmation
-  const startBeepLoop = useCallback(() => {
-  if (!audioCtxRef.current) return;
-  if (!isMobileRef.current) return; // desktop: never start beep loop
-    stopBeepLoop();
-    const ctx = audioCtxRef.current;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.15; // start slightly louder
-    gain.connect(ctx.destination);
-    beepGainRef.current = gain;
-    let flip = false;
-    let count = 0;
-    const playOne = () => {
-      if (!audioCtxRef.current || !beepGainRef.current) return;
-      const o = ctx.createOscillator();
-      o.type = 'square'; // brighter
-      o.frequency.value = flip ? 1046.5 : 880; // C6 / A5 for cut-through
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.9, ctx.currentTime + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
-      o.connect(g).connect(beepGainRef.current!);
-      o.start();
-      o.stop(ctx.currentTime + 0.32);
-      setTimeout(()=>{ try { g.disconnect(); } catch {} }, 400);
-      flip = !flip;
-      count++;
-      // Every 4 beeps, if user still hasn't confirmed, raise master gain a bit (cap)
-      if (count % 4 === 0 && beepGainRef.current) {
-        const current = beepGainRef.current.gain.value;
-        if (current < 0.4) beepGainRef.current.gain.setValueAtTime(Math.min(0.4, current + 0.05), ctx.currentTime);
-      }
-    };
-    playOne();
-    beepIntervalRef.current = window.setInterval(playOne, 600);
-    setBeepLooping(true);
-  }, []);
-
-  const stopBeepLoop = useCallback(() => {
-    if (beepIntervalRef.current) { clearInterval(beepIntervalRef.current); beepIntervalRef.current = null; }
-    try { beepGainRef.current?.disconnect(); } catch {}
-    beepGainRef.current = null;
-    setBeepLooping(false);
-  }, []);
-
-  const unlockAudio = useCallback(async () => {
-    setUnlockAttempted(true);
-    // Create/resume context and produce immediate oscillator ping BEFORE loading instrument for guaranteed audible gesture
-    if (!audioCtxRef.current) {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioCtxRef.current = ctx;
-      setAudioCtx(ctx);
-    }
-    if (audioCtxRef.current?.state === 'suspended') {
-      try { await audioCtxRef.current.resume(); } catch {}
-    }
-    // Immediate short ping at middle C (60)
-  audioServiceRef.current?.playNote(60, 0.25);
-    // Also fire an HTML media element play attempt (some iOS internal speaker cases latch only after a media element play)
-    try {
-      if (htmlAudioRef.current) {
-        htmlAudioRef.current.currentTime = 0;
-        htmlAudioRef.current.play().then(()=>setHtmlPrimed(true)).catch(()=>{});
-      }
-    } catch {}
-    // Start repeating audible beeps until user confirms hearing (mobile only). Desktop: auto-confirm silently.
-    if (audioCtxRef.current?.state === 'running') {
-      if (isMobileRef.current) {
-        if (!beepLooping) {
-          startBeepLoop();
-          setDebugInfo(d=> d + ` | unlock gesture ctx=${audioCtxRef.current?.state}`);
-        }
-        setAudioUnlocked(true);
-      } else {
-        // Desktop
-        setAudioUnlocked(true);
-        if (!heardConfirm) setHeardConfirm(true);
-        // Ensure no stray loop
-        if (beepLooping) stopBeepLoop();
-      }
-    }
-    // Now asynchronously load instrument (don't block UI)
+  // Wrap original unlock to also trigger instrument load asynchronously
+  const wrappedUnlock = useCallback(async () => {
+    await unlockAudio();
     initInstrument();
-  }, [initInstrument, startBeepLoop, beepLooping, heardConfirm, stopBeepLoop]);
+  }, [unlockAudio, initInstrument]);
 
 
-  const hardResetAudio = useCallback(() => {
-    try {
-      if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
-      audioCtxRef.current = null;
-      setAudioCtx(null);
-      setAudioUnlocked(false);
-      setDebugInfo('AudioContext reset');
-	stopBeepLoop();
-  setHeardConfirm(false);
-  try { sessionStorage.removeItem('earTrainerHeard'); } catch {}
-    } catch {}
-  }, []);
+  const hardResetWrapper = useCallback(() => {
+    hardResetAudio();
+    setAudioCtx(null);
+  }, [hardResetAudio]);
 
   const playHtmlBeep = useCallback(() => {
     try {
@@ -245,7 +167,7 @@ const App: React.FC = () => {
 
   // Alternate aggressive unlock (mobile troubleshooting). Desktop just returns.
   const altUnlock = useCallback(async () => {
-  if (!isMobileRef.current) { if (!audioUnlocked) unlockAudio(); return; }
+    if (!isMobile) { if (!audioUnlocked) wrappedUnlock(); return; }
     try {
       setUnlockAttempted(true);
       if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
@@ -271,7 +193,7 @@ const App: React.FC = () => {
     } catch {
       setDebugInfo('altUnlock error');
     }
-  }, [audioUnlocked, bufferBeep, beepLooping, startBeepLoop, unlockAudio]);
+  }, [audioUnlocked, bufferBeep, beepLooping, startBeepLoop, wrappedUnlock, isMobile]);
 
   const getKeyRootMidi = () => computeRoot(keyCenterRef.current);
 
@@ -459,66 +381,12 @@ const App: React.FC = () => {
   }, [noteMode, lowPitch, highPitch, chooseRandomNote]);
 
   // Attempt passive unlock on first pointer interaction (won't show errors if blocked)
-  useEffect(() => {
-    if (audioUnlocked) return;
-    if (!isMobileRef.current) { // desktop usually auto unlocks; attempt silently
-      unlockAudio();
-      return;
-    }
-    const handler = () => { unlockAudio(); };
-    const resumeHandler = () => { if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume(); };
-    document.addEventListener('touchend', handler, { once: true, passive: true });
-    document.addEventListener('mousedown', handler, { once: true });
-    document.addEventListener('visibilitychange', resumeHandler);
-    window.addEventListener('focus', resumeHandler);
-    document.addEventListener('touchstart', resumeHandler, { passive: true });
-    return () => {
-      document.removeEventListener('touchend', handler);
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('visibilitychange', resumeHandler);
-      window.removeEventListener('focus', resumeHandler);
-      document.removeEventListener('touchstart', resumeHandler);
-    };
-  }, [audioUnlocked, unlockAudio]);
+  // passive unlock now handled inside hook
 
-  useEffect(() => {
-    let id: number | null = null;
-    const prevRef = { t: audioCtxRef.current?.currentTime };
-    const loop = () => {
-      if (audioCtxRef.current) {
-        const t = audioCtxRef.current.currentTime;
-        setCtxProgressing(p => p == null ? null : (t !== prevRef.t));
-        setCtxTime(t);
-        prevRef.t = t;
-      }
-      id = window.setTimeout(loop, 600);
-    };
-    loop();
-    return () => { if (id) clearTimeout(id); };
-  }, []);
+  // context time tracking handled in hook
 
   // Lifecycle + route change listeners to aggressively resume / re-prime
-  useEffect(() => {
-    const resume = () => {
-      if (audioCtxRef.current?.state === 'suspended') {
-        audioCtxRef.current.resume().catch(()=>{});
-      }
-      if (htmlAudioRef.current && !htmlPrimed) {
-        htmlAudioRef.current.play().then(()=>setHtmlPrimed(true)).catch(()=>{});
-      }
-    };
-    const pageShow = () => resume();
-    const visibility = () => { if (document.visibilityState === 'visible') resume(); };
-    window.addEventListener('pageshow', pageShow);
-    document.addEventListener('visibilitychange', visibility);
-    // mediaDevices devicechange (not always supported on iOS) to re-prime after unplugging BT
-    try { navigator.mediaDevices?.addEventListener('devicechange', resume); } catch {}
-    return () => {
-      window.removeEventListener('pageshow', pageShow);
-      document.removeEventListener('visibilitychange', visibility);
-      try { navigator.mediaDevices?.removeEventListener('devicechange', resume); } catch {}
-    };
-  }, [htmlPrimed]);
+  // lifecycle resume managed in hook (retain htmlPrimed for root ping)
 
   // After confirmation + instrument load, ensure at least one piano note actually sounds (guard against route muted)
   useEffect(() => {
@@ -530,16 +398,10 @@ const App: React.FC = () => {
   }, [heardConfirm, instrumentLoaded, safePlay]);
 
   // Auto-stop beep loop once instrument loaded and user confirmed
-  useEffect(() => {
-    if (instrumentLoaded && heardConfirm && beepLooping) {
-      stopBeepLoop();
-    }
-  }, [instrumentLoaded, heardConfirm, beepLooping, stopBeepLoop]);
+  // beep loop auto-stop handled in hook
 
   // If not mobile, ensure beep loop never runs (safety in case of state carryover)
-  useEffect(() => {
-    if (!isMobileRef.current && beepLooping) stopBeepLoop();
-  }, [beepLooping, stopBeepLoop]);
+  // desktop safety handled in hook
 
   // Persist confirmation
   useEffect(() => {
@@ -569,7 +431,7 @@ const App: React.FC = () => {
         playsInline
         preload="auto"
         src="data:audio/wav;base64,UklGRl4AAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YU4AAAAA//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f" />
-  {!heardConfirm && isMobileRef.current && (
+  {!heardConfirm && isMobile && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center', backdropFilter:'blur(2px)'}}>
           <h2 style={{margin:'0 0 0.75rem'}}>{audioUnlocked ? 'Confirm Sound' : 'Enable Audio'}</h2>
           <p style={{maxWidth:520, fontSize:'0.85rem', lineHeight:1.4}}>
@@ -577,7 +439,7 @@ const App: React.FC = () => {
           </p>
           <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', justifyContent:'center', marginTop:'0.4rem'}}>
             {!audioUnlocked && (
-              <button onClick={unlockAudio} disabled={loadingInstrument} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem'}}>
+              <button onClick={wrappedUnlock} disabled={loadingInstrument} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem'}}>
                 {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
               </button>
             )}
@@ -587,7 +449,7 @@ const App: React.FC = () => {
             {audioUnlocked && !heardConfirm && (
               <button onClick={() => { setHeardConfirm(true); stopBeepLoop(); setAudioUnlocked(true); }} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem', background:'#2d7', color:'#000', fontWeight:600}}>I Hear It</button>
             )}
-            <button onClick={hardResetAudio} style={{fontSize:'0.65rem'}}>Reset Audio</button>
+              <button onClick={hardResetWrapper} style={{fontSize:'0.65rem'}}>Reset Audio</button>
             <button onClick={()=>setShowDebug(s=>!s)} style={{fontSize:'0.65rem'}}>{showDebug ? 'Hide Debug' : 'Debug'}</button>
           </div>
           {showDebug && (
