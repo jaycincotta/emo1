@@ -40,7 +40,7 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
   useLayoutEffect(()=>{
     if (!scrollRef.current) return;
     const el = scrollRef.current;
-    const MIN_W = 14; const IDEAL_W = 42; const LEGIBLE_W = 20; // allow smaller keys before shrink
+  const MIN_W = 9; const IDEAL_W = 42; const LEGIBLE_W = 18; // lowered minima for very narrow phones
     const compute = () => {
       const avail = el.clientWidth; // constrained by root container now
       if (avail >= totalWhite * IDEAL_W) {
@@ -80,7 +80,7 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
 
   return (
     <div className="full-piano-wrapper" ref={scrollRef} role="group" aria-label="Full piano 88 keys" data-range={`${midiToName(low)}-${midiToName(high)}`}>
-        <div className="full-piano" style={{ width: keyboardPixelWidth, ['--white-w' as any]: whiteW+'px' }}>
+  <div className="full-piano" style={{ width: keyboardPixelWidth, ['--white-w' as any]: whiteW+'px', height: Math.round(whiteW * 3.1) }}>
           {keys.filter(k=>k.isWhite).map(k => {
             const inRange = k.midi>=low && k.midi<=high;
             const edge = k.midi===low || k.midi===high;
