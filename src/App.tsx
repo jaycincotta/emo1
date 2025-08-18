@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './App.module.css';
 import FullKeyboardRange from './components/FullKeyboardRange';
-import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
+import { SOLFEGE_MAP, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 import { AudioService } from './audio/AudioService';
 import { useAudioUnlock } from './hooks/useAudioUnlock';
 import { useAutoplayCycle } from './hooks/useAutoplayCycle';
 import { UnlockOverlay } from './components';
 
 const App: React.FC = () => {
-  const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null); // state kept for potential UI/debug
   const audioCtxRef = useRef<AudioContext | null>(null);
   const [loadingInstrument, setLoadingInstrument] = useState(false); // mirrors AudioService.isLoading
   const [instrumentLoaded, setInstrumentLoaded] = useState(false); // mirrors AudioService.isLoaded
@@ -50,8 +49,7 @@ const App: React.FC = () => {
   const [highPitch, setHighPitch] = useState(DEFAULT_HIGH);
   const [cadenceSpeed, setCadenceSpeed] = useState<'slow'|'medium'|'fast'>('medium');
   const [autoPlaySpeed, setAutoPlaySpeed] = useState<'slow'|'medium'|'fast'>('medium');
-  const [isPlayingExternal, setIsPlayingExternal] = useState(false); // removed later; kept for compatibility
-  const [htmlPrimed, setHtmlPrimed] = useState(false); // local tracking still used for post-load soft ping
+  // removed unused states: isPlayingExternal, htmlPrimed (debug remnants)
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const primeAudio = useCallback(async () => {
@@ -79,8 +77,7 @@ const App: React.FC = () => {
     const service = audioServiceRef.current!;
     try {
       const ctx = service.ensureContext();
-      audioCtxRef.current = ctx; // keep legacy refs in sync
-      setAudioCtx(ctx);
+  audioCtxRef.current = ctx; // keep legacy refs in sync
       if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
       await primeAudio();
       if (service.isLoaded) return;
@@ -98,98 +95,13 @@ const App: React.FC = () => {
     audioServiceRef.current?.playNote(midi, duration);
   }, []);
 
-  // Emergency loud single beep helper (square wave burst) to verify output path
-  const loudBeep = useCallback(() => {
-    if (!audioCtxRef.current) return;
-    const ctx = audioCtxRef.current;
-    const osc = ctx.createOscillator();
-    osc.type = 'square';
-    osc.frequency.value = 1000;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
-    osc.connect(g).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.42);
-    setTimeout(()=>{ try { g.disconnect(); } catch {} }, 500);
-  }, []);
-
-  // Render a short beep via OfflineAudioContext then play it to ensure decode+play path works
-  const bufferBeep = useCallback(async () => {
-    try {
-      const sampleRate = 44100;
-      const dur = 0.35;
-      const offline = new OfflineAudioContext(1, sampleRate * dur, sampleRate);
-      const osc = offline.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      const gain = offline.createGain();
-      gain.gain.setValueAtTime(0.0001, 0);
-      gain.gain.exponentialRampToValueAtTime(0.8, 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, dur);
-      osc.connect(gain).connect(offline.destination);
-      osc.start(); osc.stop(dur);
-      const rendered = await offline.startRendering();
-      if (!audioCtxRef.current) return;
-      const ctx = audioCtxRef.current;
-      const src = ctx.createBufferSource();
-      src.buffer = rendered;
-      src.connect(ctx.destination);
-      src.start();
-    } catch (e) {
-      setDebugInfo(d => d + ' | bufferBeep err');
-    }
-  }, []);
-
   const wrappedUnlock = useCallback(async () => {
     await unlockAudio();
     initInstrument();
   }, [unlockAudio, initInstrument]);
 
 
-  const hardResetWrapper = useCallback(() => {
-    hardResetAudio();
-    setAudioCtx(null);
-  }, [hardResetAudio]);
-
-  const playHtmlBeep = useCallback(() => {
-    try {
-      // 440Hz ~250ms generated PCM wav (audible)
-      const a = new Audio('data:audio/wav;base64,UklGRl4AAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YU4AAAAA//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f');
-      a.play().then(()=>setDebugInfo(d=>d+' | htmlAudio ok')).catch(()=>setDebugInfo(d=>d+' | htmlAudio err'));
-    } catch {}
-  }, []);
-
-  // Alternate aggressive unlock (mobile troubleshooting). Desktop just returns.
-  const altUnlock = useCallback(async () => {
-    if (!isMobile) { if (!audioUnlocked) wrappedUnlock(); return; }
-    try {
-      setUnlockAttempted(true);
-      if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch {} }
-      const Ctor: any = (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (!Ctor) { setDebugInfo('No AudioContext'); return; }
-      const ctx: AudioContext = new Ctor({ latencyHint:'interactive' });
-      audioCtxRef.current = ctx; setAudioCtx(ctx);
-      for (let i=0;i<3;i++) { if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} } }
-      [440,660,880].forEach((f,ix) => {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type='sine'; o.frequency.value=f;
-        g.gain.setValueAtTime(0.0001, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5 + ix*0.05);
-        o.connect(g).connect(ctx.destination);
-        o.start(); o.stop(ctx.currentTime + 0.55 + ix*0.05);
-        setTimeout(()=>{ try { g.disconnect(); } catch {} }, 900);
-      });
-      bufferBeep();
-      if (!beepLooping) startBeepLoop();
-      setAudioUnlocked(true);
-    } catch {
-      setDebugInfo('altUnlock error');
-    }
-  }, [audioUnlocked, bufferBeep, beepLooping, startBeepLoop, wrappedUnlock, isMobile]);
+  const hardResetWrapper = useCallback(() => { hardResetAudio(); }, [hardResetAudio]);
 
   const getKeyRootMidi = () => computeRoot(keyCenterRef.current);
 
