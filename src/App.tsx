@@ -3,6 +3,7 @@ import FullKeyboardRange from './components/FullKeyboardRange';
 import { SOLFEGE_MAP, TEMPO_VALUES, AUTO_PLAY_INTERVAL, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 import { AudioService } from './audio/AudioService';
 import { useAudioUnlock } from './hooks/useAudioUnlock';
+import { UnlockOverlay } from './components';
 
 const App: React.FC = () => {
   const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null); // state kept for potential UI/debug
@@ -431,35 +432,24 @@ const App: React.FC = () => {
         playsInline
         preload="auto"
         src="data:audio/wav;base64,UklGRl4AAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YU4AAAAA//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f//+f" />
-  {!heardConfirm && isMobile && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center', backdropFilter:'blur(2px)'}}>
-          <h2 style={{margin:'0 0 0.75rem'}}>{audioUnlocked ? 'Confirm Sound' : 'Enable Audio'}</h2>
-          <p style={{maxWidth:520, fontSize:'0.85rem', lineHeight:1.4}}>
-            {audioUnlocked ? 'You should hear soft alternating beeps. If you do, press I Hear It.' : 'Tap Enable Audio to start a repeating soft beep. Turn OFF Silent Mode and raise volume.'}
-          </p>
-          <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', justifyContent:'center', marginTop:'0.4rem'}}>
-            {!audioUnlocked && (
-              <button onClick={wrappedUnlock} disabled={loadingInstrument} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem'}}>
-                {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
-              </button>
-            )}
-            {audioUnlocked && !heardConfirm && (
-              <button onClick={() => { if (!beepLooping) startBeepLoop(); }} style={{fontSize:'0.8rem', padding:'0.55rem 0.9rem'}}>Replay Beeps</button>
-            )}
-            {audioUnlocked && !heardConfirm && (
-              <button onClick={() => { setHeardConfirm(true); stopBeepLoop(); setAudioUnlocked(true); }} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem', background:'#2d7', color:'#000', fontWeight:600}}>I Hear It</button>
-            )}
-              <button onClick={hardResetWrapper} style={{fontSize:'0.65rem'}}>Reset Audio</button>
-            <button onClick={()=>setShowDebug(s=>!s)} style={{fontSize:'0.65rem'}}>{showDebug ? 'Hide Debug' : 'Debug'}</button>
-          </div>
-          {showDebug && (
-            <div style={{marginTop:'0.6rem', fontSize:'0.55rem', opacity:0.7, maxWidth:360, textAlign:'left'}}>
-              <div>{debugInfo}</div>
-              <div>beep {beepLooping?'on':'off'} inst {instrumentLoaded?'yes':'no'} ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} sr {audioCtxRef.current?.sampleRate || '?'} </div>
-            </div>
-          )}
-        </div>
-      )}
+      <UnlockOverlay
+        visible={!heardConfirm && isMobile}
+        audioUnlocked={audioUnlocked}
+        unlockAttempted={unlockAttempted}
+        loadingInstrument={loadingInstrument}
+        beepLooping={beepLooping}
+        instrumentLoaded={instrumentLoaded}
+        ctxTime={ctxTime}
+        ctxProgressing={ctxProgressing}
+        audioCtx={audioCtxRef.current}
+        debugInfo={debugInfo}
+        showDebug={showDebug}
+        onToggleDebug={()=>setShowDebug(s=>!s)}
+        onEnable={wrappedUnlock}
+        onReplayBeeps={()=>{ if (!beepLooping) startBeepLoop(); }}
+        onHeard={()=>{ setHeardConfirm(true); stopBeepLoop(); setAudioUnlocked(true); }}
+        onReset={hardResetWrapper}
+      />
       <h1>Solfege Ear Trainer</h1>
       <div className="card" style={{display:'flex', flexDirection:'column', gap:'0.25rem'}}>
         <div className="key-name">Key Center: <strong>{keyDisplay}</strong></div>
