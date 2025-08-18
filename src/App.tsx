@@ -103,27 +103,63 @@ const App: React.FC = () => {
         try { await audioCtxRef.current.resume(); } catch {}
       }
       await primeAudio();
-      if (audioCtxRef.current?.state === 'running') setAudioUnlocked(true);
       if (instrumentRef.current) return;
       setLoadingInstrument(true);
   setDebugInfo(`ctxState=${audioCtxRef.current?.state}; unlocked=${audioUnlocked}`);
       const piano = await Soundfont.instrument(audioCtxRef.current!, 'acoustic_grand_piano');
       instrumentRef.current = piano;
+      // Only mark unlocked automatically if a prior manual unlock occurred
+      if (!audioUnlocked) {
+        setAudioUnlocked(true);
+      }
     } finally {
       setLoadingInstrument(false);
     }
   }, [primeAudio]);
 
+  // Fallback oscillator (simple sine with quick envelope) used if instrument not loaded yet
+  const fallbackOsc = useCallback((midi: number, duration = 0.6) => {
+    if (!audioCtxRef.current) return;
+    const ctx = audioCtxRef.current;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration + 0.02);
+  }, []);
+
+  const safePlay = useCallback((midi: number, duration = 1) => {
+    if (instrumentRef.current) {
+      try { instrumentRef.current.play(midiToName(midi), (audioCtxRef.current?.currentTime || 0) + 0.01, { duration }); return; } catch {}
+    }
+    fallbackOsc(midi, Math.min(duration, 0.9));
+  }, [fallbackOsc]);
+
   const unlockAudio = useCallback(async () => {
     setUnlockAttempted(true);
-    await initInstrument();
-    // simple feedback: play an ultra-short quiet note (middle C) if unlocked to reassure user
-    if (audioCtxRef.current?.state === 'running' && instrumentRef.current) {
-      setAudioUnlocked(true);
-  try { instrumentRef.current.play('C4', undefined as any, { duration: 0.3 }); } catch {}
-  if (audioCtxRef.current) setDebugInfo(`unlock gesture -> state=${audioCtxRef.current.state}`);
+    // Create/resume context and produce immediate oscillator ping BEFORE loading instrument for guaranteed audible gesture
+    if (!audioCtxRef.current) {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioCtxRef.current = ctx;
+      setAudioCtx(ctx);
     }
-  }, [initInstrument]);
+    if (audioCtxRef.current?.state === 'suspended') {
+      try { await audioCtxRef.current.resume(); } catch {}
+    }
+    // Immediate short ping at middle C (60)
+    fallbackOsc(60, 0.25);
+    if (audioCtxRef.current?.state === 'running') {
+      setAudioUnlocked(true); // show main UI after audible attempt
+      setDebugInfo(`unlock gesture ctx=${audioCtxRef.current.state}`);
+    }
+    // Now asynchronously load instrument (don't block UI)
+    initInstrument();
+  }, [fallbackOsc, initInstrument]);
 
   const hardResetAudio = useCallback(() => {
     try {
@@ -153,16 +189,15 @@ const App: React.FC = () => {
   const getKeyRootMidi = () => computeRoot(keyCenterRef.current);
 
   const playNote = useCallback((midi: number, duration = 1) => {
-    if (!instrumentRef.current) return;
+    if (!audioCtxRef.current) return;
     const ctx = audioCtxRef.current;
     if (ctx && ctx.state !== 'running') {
       ctx.resume().catch(()=>{});
     }
-  if (ctx?.state === 'running' && !audioUnlocked) setAudioUnlocked(true);
-    const when = (ctx?.currentTime || 0) + 0.02;
-    instrumentRef.current.play(midiToName(midi), when, { duration });
-  setDebugInfo(`playNote -> ctx=${ctx?.state} t=${when.toFixed(2)}`);
-  }, []);
+    if (ctx?.state === 'running' && !audioUnlocked) setAudioUnlocked(true);
+    safePlay(midi, duration);
+    setDebugInfo(`playNote -> ctx=${ctx?.state}`);
+  }, [safePlay, audioUnlocked]);
 
   const scheduleCadence = useCallback((keyOverride?: string): number => {
     const ctx = audioCtxRef.current;
@@ -180,12 +215,19 @@ const App: React.FC = () => {
     const seq: number[][] = [I, IV, V, I];
     const baseTime = ctx.currentTime + 0.05; // slight offset to avoid scheduling in past
     seq.forEach(ch => {
-      ch.forEach(n => instrumentRef.current!.play(midiToName(n), baseTime + rel, { duration: chordDuration }));
+      ch.forEach(n => {
+        if (instrumentRef.current) {
+          instrumentRef.current.play(midiToName(n), baseTime + rel, { duration: chordDuration });
+        } else {
+          // fallback schedule approximate using setTimeout & osc
+          setTimeout(() => fallbackOsc(n, chordDuration * 0.9), (baseTime + rel - ctx.currentTime) * 1000);
+        }
+      });
       rel += chordDuration + chordGap;
     });
   // console.debug('Cadence scheduled', { root, totalSeconds: rel, keyOverride });
     return rel; // total length in seconds
-  }, [cadenceSpeed]);
+  }, [cadenceSpeed, fallbackOsc]);
 
   const chooseRandomNote = useCallback(() => {
     const attempts = 50;
