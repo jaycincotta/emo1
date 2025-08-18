@@ -10,14 +10,11 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const [loadingInstrument, setLoadingInstrument] = useState(false); // mirrors AudioService.isLoading
   const [instrumentLoaded, setInstrumentLoaded] = useState(false); // mirrors AudioService.isLoaded
-  // Audio unlock + beep loop handled via custom hook
   const {
     audioUnlocked,
     setAudioUnlocked,
     unlockAttempted,
   setUnlockAttempted,
-  // add missing setter for altUnlock usage
-  // we expose unlockAttempted but not setter originally; replicate local behavior by tracking attempt via wrapper state if needed
     heardConfirm,
     setHeardConfirm,
     showDebug,
@@ -145,8 +142,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Start a quiet repeating beep (alternating two frequencies) until confirmation
-  // Wrap original unlock to also trigger instrument load asynchronously
   const wrappedUnlock = useCallback(async () => {
     await unlockAudio();
     initInstrument();
@@ -381,14 +376,6 @@ const App: React.FC = () => {
     }
   }, [noteMode, lowPitch, highPitch, chooseRandomNote]);
 
-  // Attempt passive unlock on first pointer interaction (won't show errors if blocked)
-  // passive unlock now handled inside hook
-
-  // context time tracking handled in hook
-
-  // Lifecycle + route change listeners to aggressively resume / re-prime
-  // lifecycle resume managed in hook (retain htmlPrimed for root ping)
-
   // After confirmation + instrument load, ensure at least one piano note actually sounds (guard against route muted)
   useEffect(() => {
     if (heardConfirm && instrumentLoaded) {
@@ -397,14 +384,6 @@ const App: React.FC = () => {
       setTimeout(()=> safePlay(root, 0.4), 120);
     }
   }, [heardConfirm, instrumentLoaded, safePlay]);
-
-  // Auto-stop beep loop once instrument loaded and user confirmed
-  // beep loop auto-stop handled in hook
-
-  // If not mobile, ensure beep loop never runs (safety in case of state carryover)
-  // desktop safety handled in hook
-
-  // Persist confirmation
   useEffect(() => {
     if (heardConfirm) {
       try { sessionStorage.setItem('earTrainerHeard', '1'); } catch {}
