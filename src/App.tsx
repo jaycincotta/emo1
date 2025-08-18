@@ -70,6 +70,11 @@ const App: React.FC = () => {
   const [debugInfo, setDebugInfo] = useState<string>('');
   const [ctxTime, setCtxTime] = useState<number>(0);
   const [ctxProgressing, setCtxProgressing] = useState<boolean | null>(null);
+  // Beep loop + confirmation for robust iOS unlock
+  const [beepLooping, setBeepLooping] = useState(false);
+  const beepIntervalRef = useRef<number | null>(null);
+  const beepGainRef = useRef<GainNode | null>(null);
+  const [heardConfirm, setHeardConfirm] = useState(false);
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const primeAudio = useCallback(async () => {
@@ -140,6 +145,43 @@ const App: React.FC = () => {
     fallbackOsc(midi, Math.min(duration, 0.9));
   }, [fallbackOsc]);
 
+  // Start a quiet repeating beep (alternating two frequencies) until confirmation
+  const startBeepLoop = useCallback(() => {
+    if (!audioCtxRef.current) return;
+    stopBeepLoop();
+    const ctx = audioCtxRef.current;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.08; // soft
+    gain.connect(ctx.destination);
+    beepGainRef.current = gain;
+    let flip = false;
+    const playOne = () => {
+      if (!audioCtxRef.current || !beepGainRef.current) return;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = flip ? 880 : 660; // two pitches to be noticeable
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(1, ctx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+      o.connect(g).connect(beepGainRef.current!);
+      o.start();
+      o.stop(ctx.currentTime + 0.32);
+      setTimeout(()=>{ try { g.disconnect(); } catch {} }, 400);
+      flip = !flip;
+    };
+    playOne();
+    beepIntervalRef.current = window.setInterval(playOne, 600);
+    setBeepLooping(true);
+  }, []);
+
+  const stopBeepLoop = useCallback(() => {
+    if (beepIntervalRef.current) { clearInterval(beepIntervalRef.current); beepIntervalRef.current = null; }
+    try { beepGainRef.current?.disconnect(); } catch {}
+    beepGainRef.current = null;
+    setBeepLooping(false);
+  }, []);
+
   const unlockAudio = useCallback(async () => {
     setUnlockAttempted(true);
     // Create/resume context and produce immediate oscillator ping BEFORE loading instrument for guaranteed audible gesture
@@ -153,13 +195,15 @@ const App: React.FC = () => {
     }
     // Immediate short ping at middle C (60)
     fallbackOsc(60, 0.25);
-    if (audioCtxRef.current?.state === 'running') {
-      setAudioUnlocked(true); // show main UI after audible attempt
-      setDebugInfo(`unlock gesture ctx=${audioCtxRef.current.state}`);
+    // Start repeating audible beeps until user confirms hearing
+    if (audioCtxRef.current?.state === 'running' && !beepLooping) {
+      startBeepLoop();
+      setDebugInfo(d=> d + ` | unlock gesture ctx=${audioCtxRef.current?.state}`);
     }
     // Now asynchronously load instrument (don't block UI)
     initInstrument();
-  }, [fallbackOsc, initInstrument]);
+  }, [fallbackOsc, initInstrument, startBeepLoop, beepLooping]);
+
 
   const hardResetAudio = useCallback(() => {
     try {
@@ -169,6 +213,8 @@ const App: React.FC = () => {
       setAudioCtx(null);
       setAudioUnlocked(false);
       setDebugInfo('AudioContext reset');
+  stopBeepLoop();
+  setHeardConfirm(false);
     } catch {}
   }, []);
 
@@ -447,27 +493,32 @@ const App: React.FC = () => {
 
   return (
     <div>
-  {!audioUnlocked && isMobileRef.current && (
+  {(!audioUnlocked || !heardConfirm) && isMobileRef.current && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center', backdropFilter:'blur(2px)'}}>
-          <h2 style={{margin:'0 0 1rem'}}>Enable Audio</h2>
+          <h2 style={{margin:'0 0 0.75rem'}}>{audioUnlocked ? 'Confirm Sound' : 'Enable Audio'}</h2>
           <p style={{maxWidth:520, fontSize:'0.85rem', lineHeight:1.4}}>
-            Tap Enable Audio (and possibly Test Tone) to unlock sound. Turn OFF Silent Mode and raise volume. Stay on this page for a moment if the clock is not advancing.
+            {audioUnlocked ? 'Do you hear the soft alternating beeps? If yes, press I Hear It to continue.' : 'Tap Enable Audio to start a repeating soft beep. Turn OFF Silent Mode and raise volume.'}
           </p>
-          <button onClick={unlockAudio} disabled={loadingInstrument} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem', marginTop:'0.6rem'}}>
-            {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
-          </button>
-          <div style={{display:'flex', gap:'0.4rem', marginTop:'0.6rem', flexWrap:'wrap', justifyContent:'center'}}>
-            <button onClick={() => {
-              if (!audioCtxRef.current) return; const ctx = audioCtxRef.current; if (ctx.state==='suspended') ctx.resume();
-              const osc = ctx.createOscillator(); const gain = ctx.createGain(); gain.gain.value=0.04; osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime+0.3); setTimeout(()=>gain.disconnect(), 500); setDebugInfo(`testTone ctx=${ctx.state}`);
-              setAudioUnlocked(ctx.state==='running');
-            }} style={{fontSize:'0.65rem'}}>Test Tone</button>
-            <button onClick={playHtmlBeep} style={{fontSize:'0.65rem'}}>HTML Beep</button>
+          <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', justifyContent:'center', marginTop:'0.4rem'}}>
+            {!audioUnlocked && (
+              <button onClick={unlockAudio} disabled={loadingInstrument} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem'}}>
+                {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
+              </button>
+            )}
+            {audioUnlocked && !heardConfirm && (
+              <button onClick={() => { if (!beepLooping) startBeepLoop(); }} style={{fontSize:'0.8rem', padding:'0.55rem 0.9rem'}}>Replay Beeps</button>
+            )}
+            {audioUnlocked && !heardConfirm && (
+              <button onClick={() => { setHeardConfirm(true); stopBeepLoop(); setAudioUnlocked(true); }} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem', background:'#2d7', color:'#000', fontWeight:600}}>I Hear It</button>
+            )}
+            {!heardConfirm && (
+              <button onClick={() => { playHtmlBeep(); }} style={{fontSize:'0.65rem'}}>HTML Beep</button>
+            )}
             <button onClick={hardResetAudio} style={{fontSize:'0.65rem'}}>Reset</button>
           </div>
-          <div style={{marginTop:'0.75rem', fontSize:'0.55rem', opacity:0.7, maxWidth:340}}>
+          <div style={{marginTop:'0.6rem', fontSize:'0.55rem', opacity:0.7, maxWidth:360}}>
             <div>{debugInfo}</div>
-            <div>ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} sr {audioCtxRef.current?.sampleRate || '?'} </div>
+            <div>beep {beepLooping?'on':'off'} confirm {heardConfirm?'yes':'no'} ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} </div>
           </div>
         </div>
       )}
