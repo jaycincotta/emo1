@@ -43,6 +43,7 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const instrumentRef = useRef<Player | null>(null);
   const [loadingInstrument, setLoadingInstrument] = useState(false);
+  const [instrumentLoaded, setInstrumentLoaded] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [unlockAttempted, setUnlockAttempted] = useState(false);
   const initialIsMobile = typeof navigator !== 'undefined' && /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent);
@@ -74,7 +75,10 @@ const App: React.FC = () => {
   const [beepLooping, setBeepLooping] = useState(false);
   const beepIntervalRef = useRef<number | null>(null);
   const beepGainRef = useRef<GainNode | null>(null);
-  const [heardConfirm, setHeardConfirm] = useState(false);
+  const [heardConfirm, setHeardConfirm] = useState<boolean>(() => {
+    try { return sessionStorage.getItem('earTrainerHeard') === '1'; } catch { return false; }
+  });
+  const [showDebug, setShowDebug] = useState(false);
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const primeAudio = useCallback(async () => {
@@ -117,6 +121,7 @@ const App: React.FC = () => {
       if (!audioUnlocked) {
         setAudioUnlocked(true);
       }
+  setInstrumentLoaded(true);
     } finally {
       setLoadingInstrument(false);
     }
@@ -250,6 +255,7 @@ const App: React.FC = () => {
     if (audioCtxRef.current?.state === 'running' && !beepLooping) {
       startBeepLoop();
       setDebugInfo(d=> d + ` | unlock gesture ctx=${audioCtxRef.current?.state}`);
+  setAudioUnlocked(true); // allow main UI once context is running; overlay persists until heardConfirm
     }
     // Now asynchronously load instrument (don't block UI)
     initInstrument();
@@ -266,6 +272,7 @@ const App: React.FC = () => {
       setDebugInfo('AudioContext reset');
   stopBeepLoop();
   setHeardConfirm(false);
+  try { sessionStorage.removeItem('earTrainerHeard'); } catch {}
     } catch {}
   }, []);
 
@@ -566,6 +573,20 @@ const App: React.FC = () => {
     return () => { if (id) clearTimeout(id); };
   }, []);
 
+  // Auto-stop beep loop once instrument loaded and user confirmed
+  useEffect(() => {
+    if (instrumentLoaded && heardConfirm && beepLooping) {
+      stopBeepLoop();
+    }
+  }, [instrumentLoaded, heardConfirm, beepLooping, stopBeepLoop]);
+
+  // Persist confirmation
+  useEffect(() => {
+    if (heardConfirm) {
+      try { sessionStorage.setItem('earTrainerHeard', '1'); } catch {}
+    }
+  }, [heardConfirm]);
+
   // Recompute solfege if key changes while a note is displayed (e.g., manual key switch without immediate playback)
   useEffect(()=> { keyCenterRef.current = keyCenter; }, [keyCenter]);
   useEffect(() => {
@@ -580,11 +601,11 @@ const App: React.FC = () => {
 
   return (
     <div>
-  {(!audioUnlocked || !heardConfirm) && isMobileRef.current && (
+  {!heardConfirm && isMobileRef.current && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.82)', color:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1.5rem', textAlign:'center', backdropFilter:'blur(2px)'}}>
           <h2 style={{margin:'0 0 0.75rem'}}>{audioUnlocked ? 'Confirm Sound' : 'Enable Audio'}</h2>
           <p style={{maxWidth:520, fontSize:'0.85rem', lineHeight:1.4}}>
-            {audioUnlocked ? 'Do you hear the soft alternating beeps? If yes, press I Hear It to continue.' : 'Tap Enable Audio to start a repeating soft beep. Turn OFF Silent Mode and raise volume.'}
+            {audioUnlocked ? 'You should hear soft alternating beeps. If you do, press I Hear It.' : 'Tap Enable Audio to start a repeating soft beep. Turn OFF Silent Mode and raise volume.'}
           </p>
           <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', justifyContent:'center', marginTop:'0.4rem'}}>
             {!audioUnlocked && (
@@ -598,24 +619,15 @@ const App: React.FC = () => {
             {audioUnlocked && !heardConfirm && (
               <button onClick={() => { setHeardConfirm(true); stopBeepLoop(); setAudioUnlocked(true); }} style={{fontSize:'1.05rem', padding:'0.7rem 1.1rem', background:'#2d7', color:'#000', fontWeight:600}}>I Hear It</button>
             )}
-            {!heardConfirm && (
-              <button onClick={() => { playHtmlBeep(); }} style={{fontSize:'0.65rem'}}>HTML Beep</button>
-            )}
-            {!heardConfirm && (
-              <button onClick={() => { loudBeep(); }} style={{fontSize:'0.65rem'}}>Loud Beep</button>
-            )}
-            {!heardConfirm && (
-              <button onClick={() => { bufferBeep(); }} style={{fontSize:'0.65rem'}}>Buffer Beep</button>
-            )}
-            {!heardConfirm && (
-              <button onClick={() => { altUnlock(); }} style={{fontSize:'0.65rem'}}>Alt Unlock</button>
-            )}
-            <button onClick={hardResetAudio} style={{fontSize:'0.65rem'}}>Reset</button>
+            <button onClick={hardResetAudio} style={{fontSize:'0.65rem'}}>Reset Audio</button>
+            <button onClick={()=>setShowDebug(s=>!s)} style={{fontSize:'0.65rem'}}>{showDebug ? 'Hide Debug' : 'Debug'}</button>
           </div>
-          <div style={{marginTop:'0.6rem', fontSize:'0.55rem', opacity:0.7, maxWidth:360}}>
-            <div>{debugInfo}</div>
-            <div>beep {beepLooping?'on':'off'} confirm {heardConfirm?'yes':'no'} ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} sr {audioCtxRef.current?.sampleRate || '?'} </div>
-          </div>
+          {showDebug && (
+            <div style={{marginTop:'0.6rem', fontSize:'0.55rem', opacity:0.7, maxWidth:360, textAlign:'left'}}>
+              <div>{debugInfo}</div>
+              <div>beep {beepLooping?'on':'off'} inst {instrumentLoaded?'yes':'no'} ctxTime {ctxTime.toFixed(2)} progressing {ctxProgressing===null?'?':ctxProgressing?'yes':'no'} state {audioCtxRef.current?.state || '?'} sr {audioCtxRef.current?.sampleRate || '?'} </div>
+            </div>
+          )}
         </div>
       )}
       <h1>Solfege Ear Trainer</h1>
@@ -625,59 +637,53 @@ const App: React.FC = () => {
         <div className="muted" style={{marginTop:'.25rem'}}>{currentNote!=null ? midiToName(currentNote) : ''}</div>
       </div>
 
-      <div className="card">
-        <fieldset>
-          <legend>Playback</legend>
-          <div className="row">
-            <div className="stack">
-              <label><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { setIsPlaying(false); } }} />Autoplay</label>
-              <label><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
-            </div>
-            <div className="stack">
-              <label style={{display:'flex', flexDirection:'column'}}>
-                <span>Note set</span>
-                <select value={noteMode} onChange={e=>setNoteMode(e.target.value as any)}>
-                  <option value="diatonic">Diatonic</option>
-                  <option value="non">Non-diatonic</option>
-                  <option value="chromatic">Chromatic</option>
-                </select>
-              </label>
-            </div>
-            <div className="spacer" />
-            <div className="stack">
-              <label style={{display:'flex', flexDirection:'column'}}>
-                <span>Cadence speed</span>
-                <select value={cadenceSpeed} onChange={e=>setCadenceSpeed(e.target.value as any)}>
-                  <option value="slow">slow</option>
-                  <option value="medium">medium</option>
-                  <option value="fast">fast</option>
-                </select>
-              </label>
-            </div>
-            <div className="stack">
-              <label style={{display:'flex', flexDirection:'column'}}>
-                <span>Autoplay speed</span>
-                <select value={autoPlaySpeed} onChange={e=>setAutoPlaySpeed(e.target.value as any)}>
-                  <option value="slow">slow</option>
-                  <option value="medium">medium</option>
-                  <option value="fast">fast</option>
-                </select>
-              </label>
-            </div>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Pitch Range (Full 88 Keys)</legend>
-          <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} onChange={(l,h)=>{setLowPitch(l); setHighPitch(h);}} />
-        </fieldset>
-
-        <div>
+      <div className="card" style={{display:'flex', flexDirection:'column', gap:'0.6rem'}}>
+        <div style={{display:'flex', gap:'0.5rem', flexWrap:'wrap', alignItems:'center'}}>
           <button onClick={()=>{ if (isPlaying) { stopPlayback(true); } else { startSequence(firstPlayRef.current); } }} disabled={loadingInstrument}>
             {isPlaying ? '■ Stop' : '▶ Play'}
           </button>
           <button className="secondary" onClick={()=>triggerCadence()}>Cadence</button>
           <button className="secondary" onClick={()=>newKeyCenter()}>New Key</button>
+          <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { setIsPlaying(false); } }} />Autoplay</label>
+          <label style={{fontSize:'.7rem', display:'flex', alignItems:'center', gap:'.25rem'}}><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
+        </div>
+        <div className="row" style={{flexWrap:'wrap', rowGap:'0.5rem'}}>
+          <div className="stack">
+            <label style={{display:'flex', flexDirection:'column'}}>
+              <span>Note set</span>
+              <select value={noteMode} onChange={e=>setNoteMode(e.target.value as any)}>
+                <option value="diatonic">Diatonic</option>
+                <option value="non">Non-diatonic</option>
+                <option value="chromatic">Chromatic</option>
+              </select>
+            </label>
+          </div>
+          <div className="stack">
+            <label style={{display:'flex', flexDirection:'column'}}>
+              <span>Cadence speed</span>
+              <select value={cadenceSpeed} onChange={e=>setCadenceSpeed(e.target.value as any)}>
+                <option value="slow">slow</option>
+                <option value="medium">medium</option>
+                <option value="fast">fast</option>
+              </select>
+            </label>
+          </div>
+          <div className="stack">
+            <label style={{display:'flex', flexDirection:'column'}}>
+              <span>Autoplay speed</span>
+              <select value={autoPlaySpeed} onChange={e=>setAutoPlaySpeed(e.target.value as any)}>
+                <option value="slow">slow</option>
+                <option value="medium">medium</option>
+                <option value="fast">fast</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div>
+          <fieldset style={{margin:0}}>
+            <legend>Pitch Range (Full 88 Keys)</legend>
+            <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} onChange={(l,h)=>{setLowPitch(l); setHighPitch(h);}} />
+          </fieldset>
         </div>
       </div>
 
