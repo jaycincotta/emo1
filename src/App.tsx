@@ -54,8 +54,8 @@ const App: React.FC = () => {
   // - If autoplay OFF: Play button yields one event (cadence+note if repeatCadence or first/new-key, else note only).
   const [repeatCadence, setRepeatCadence] = useState(true);
   const [autoPlay, setAutoPlay] = useState(true);
-  const [includeDiatonic, setIncludeDiatonic] = useState(true);
-  const [includeNonDiatonic, setIncludeNonDiatonic] = useState(false);
+  // Note selection mode: diatonic only, non-diatonic only, or chromatic (both)
+  const [noteMode, setNoteMode] = useState<'diatonic' | 'non' | 'chromatic'>('diatonic');
   const [lowPitch, setLowPitch] = useState(DEFAULT_LOW);
   const [highPitch, setHighPitch] = useState(DEFAULT_HIGH);
   const [cadenceSpeed, setCadenceSpeed] = useState<'slow'|'medium'|'fast'>('medium');
@@ -128,12 +128,12 @@ const App: React.FC = () => {
       const rel = (n - root + 1200) % 12; // relative distance
       const info = SOLFEGE_MAP[rel as keyof typeof SOLFEGE_MAP];
       if (!info) continue;
-      if (info.diatonic && !includeDiatonic) continue;
-      if (!info.diatonic && !includeNonDiatonic) continue;
+      if (noteMode === 'diatonic' && !info.diatonic) continue;
+      if (noteMode === 'non' && info.diatonic) continue;
       return n;
     }
     return null;
-  }, [highPitch, lowPitch, includeDiatonic, includeNonDiatonic]);
+  }, [highPitch, lowPitch, noteMode]);
 
   const updateRandomNote = useCallback((options?: { play?: boolean; keyOverride?: string }) => {
     const note = chooseRandomNote();
@@ -205,6 +205,45 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Manual cadence trigger: plays cadence for current key. If autoplay active, replay current note after cadence then resume loop timing.
+  const triggerCadence = useCallback(async () => {
+    await initInstrument();
+    if (!instrumentRef.current) return;
+    // Clear any pending cadence-only timer
+    if (cadenceTimeoutRef.current) window.clearTimeout(cadenceTimeoutRef.current);
+    const wasAutoplay = autoPlay && isPlaying;
+    if (wasAutoplay && autoplayTimeoutRef.current) {
+      window.clearTimeout(autoplayTimeoutRef.current);
+    }
+    const durSec = scheduleCadence();
+    const extraMs = 350; // buffer after chord releases
+    if (wasAutoplay && currentNote != null) {
+      cadenceTimeoutRef.current = window.setTimeout(() => {
+        // Replay current note (same syllable) then schedule next loop
+        playNote(currentNote, 1.4);
+        const scheduleNext = () => {
+          if (!autoPlay) return;
+          const interval = AUTO_PLAY_INTERVAL[autoPlaySpeed];
+          autoplayTimeoutRef.current = window.setTimeout(() => {
+            if (repeatCadence) {
+              const cadDur = scheduleCadence() * 1000 + 350;
+              cadenceTimeoutRef.current = window.setTimeout(() => {
+                updateRandomNote({ play: true });
+                scheduleNext();
+              }, cadDur);
+            } else {
+              updateRandomNote({ play: true });
+              scheduleNext();
+            }
+          }, interval);
+        };
+        // Start next cycle after normal interval from this repeated note
+        const interval = AUTO_PLAY_INTERVAL[autoPlaySpeed];
+        autoplayTimeoutRef.current = window.setTimeout(scheduleNext, interval);
+      }, durSec * 1000 + extraMs);
+    }
+  }, [initInstrument, autoPlay, isPlaying, scheduleCadence, currentNote, playNote, autoPlaySpeed, repeatCadence, updateRandomNote]);
+
   const newKeyCenter = useCallback(() => {
     const idx = Math.floor(Math.random() * keysCircle.length);
     const key = keysCircle[idx] as string;
@@ -223,6 +262,28 @@ const App: React.FC = () => {
   useEffect(() => {
     if (lowPitch > highPitch) setLowPitch(highPitch);
   }, [lowPitch, highPitch]);
+
+  // Immediate effect: when cadence speed changes during active cadence scheduling for next autoplay cycle, nothing to reschedule until next cycle.
+  // When autoplay speed changes, restart autoplay timing if currently playing.
+  useEffect(() => {
+    if (isPlaying) {
+      // restart sequence timing but keep current note displayed
+      startSequence(false);
+    }
+  }, [autoPlaySpeed, cadenceSpeed, repeatCadence, startSequence, isPlaying]);
+
+  // If note mode or range changes while not awaiting a cadence, pick a new note immediately (unless there is no note yet)
+  useEffect(() => {
+    if (currentNote != null) {
+      const newNote = chooseRandomNote();
+      if (newNote != null) {
+        setCurrentNote(newNote);
+        const root = computeRoot(keyCenterRef.current);
+        const rel = (newNote - root + 1200) % 12;
+        setShowSolfege(SOLFEGE_MAP[rel].syllable);
+      }
+    }
+  }, [noteMode, lowPitch, highPitch, chooseRandomNote]);
 
   // Recompute solfege if key changes while a note is displayed (e.g., manual key switch without immediate playback)
   useEffect(()=> { keyCenterRef.current = keyCenter; }, [keyCenter]);
@@ -254,25 +315,35 @@ const App: React.FC = () => {
               <label><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
             </div>
             <div className="stack">
-              <label><input type="checkbox" checked={includeDiatonic} onChange={e=>setIncludeDiatonic(e.target.checked)} />Include diatonic</label>
-              <label><input type="checkbox" checked={includeNonDiatonic} onChange={e=>setIncludeNonDiatonic(e.target.checked)} />Include non-diatonic</label>
+              <label style={{display:'flex', flexDirection:'column'}}>
+                <span>Note set</span>
+                <select value={noteMode} onChange={e=>setNoteMode(e.target.value as any)}>
+                  <option value="diatonic">Diatonic</option>
+                  <option value="non">Non-diatonic</option>
+                  <option value="chromatic">Chromatic</option>
+                </select>
+              </label>
             </div>
             <div className="spacer" />
             <div className="stack">
-              <div className="badge">Cadence speed</div>
-              <div className="tempo-buttons">
-                {(['slow','medium','fast'] as const).map(t => (
-                  <button key={t} className={t===cadenceSpeed? 'active':''} onClick={()=>setCadenceSpeed(t)}>{t}</button>
-                ))}
-              </div>
+              <label style={{display:'flex', flexDirection:'column'}}>
+                <span>Cadence speed</span>
+                <select value={cadenceSpeed} onChange={e=>setCadenceSpeed(e.target.value as any)}>
+                  <option value="slow">slow</option>
+                  <option value="medium">medium</option>
+                  <option value="fast">fast</option>
+                </select>
+              </label>
             </div>
             <div className="stack">
-              <div className="badge">Auto play speed</div>
-              <div className="tempo-buttons">
-                {(['slow','medium','fast'] as const).map(t => (
-                  <button key={t} className={t===autoPlaySpeed? 'active':''} onClick={()=>setAutoPlaySpeed(t)}>{t}</button>
-                ))}
-              </div>
+              <label style={{display:'flex', flexDirection:'column'}}>
+                <span>Autoplay speed</span>
+                <select value={autoPlaySpeed} onChange={e=>setAutoPlaySpeed(e.target.value as any)}>
+                  <option value="slow">slow</option>
+                  <option value="medium">medium</option>
+                  <option value="fast">fast</option>
+                </select>
+              </label>
             </div>
           </div>
         </fieldset>
@@ -286,7 +357,8 @@ const App: React.FC = () => {
           <button onClick={()=>{ if (isPlaying) { stopPlayback(true); } else { startSequence(firstPlayRef.current); } }} disabled={loadingInstrument}>
             {isPlaying ? '■ Stop' : '▶ Play'}
           </button>
-          <button className="secondary" onClick={()=>newKeyCenter()}>New Key Center</button>
+          <button className="secondary" onClick={()=>triggerCadence()}>Cadence</button>
+          <button className="secondary" onClick={()=>newKeyCenter()}>New Key</button>
         </div>
       </div>
 
