@@ -223,6 +223,13 @@ const App: React.FC = () => {
 
   const keyDisplay = `${keyCenter} Major`;
 
+  // Ensure instrument loads automatically once audio is unlocked (desktop auto-unlock path)
+  useEffect(() => {
+    if (audioUnlocked && !instrumentLoaded) {
+      initInstrument();
+    }
+  }, [audioUnlocked, instrumentLoaded, initInstrument]);
+
   return (
     <div>
       {/* Hidden html audio element for internal speaker priming (short base64 sine ~0.25s) */}
