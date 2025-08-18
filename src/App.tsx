@@ -67,6 +67,7 @@ const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const cadenceTimeoutRef = useRef<number | null>(null);
   const autoplayTimeoutRef = useRef<number | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
   const primeAudio = useCallback(async () => {
@@ -103,6 +104,7 @@ const App: React.FC = () => {
       if (audioCtxRef.current?.state === 'running') setAudioUnlocked(true);
       if (instrumentRef.current) return;
       setLoadingInstrument(true);
+  setDebugInfo(`ctxState=${audioCtxRef.current?.state}; unlocked=${audioUnlocked}`);
       const piano = await Soundfont.instrument(audioCtxRef.current!, 'acoustic_grand_piano');
       instrumentRef.current = piano;
     } finally {
@@ -116,7 +118,8 @@ const App: React.FC = () => {
     // simple feedback: play an ultra-short quiet note (middle C) if unlocked to reassure user
     if (audioCtxRef.current?.state === 'running' && instrumentRef.current) {
       setAudioUnlocked(true);
-      try { instrumentRef.current.play('C4', (audioCtxRef.current.currentTime || 0) + 0.02, { duration: 0.2 }); } catch {}
+  try { instrumentRef.current.play('C4', undefined as any, { duration: 0.3 }); } catch {}
+  if (audioCtxRef.current) setDebugInfo(`unlock gesture -> state=${audioCtxRef.current.state}`);
     }
   }, [initInstrument]);
 
@@ -138,6 +141,7 @@ const App: React.FC = () => {
   if (ctx?.state === 'running' && !audioUnlocked) setAudioUnlocked(true);
     const when = (ctx?.currentTime || 0) + 0.02;
     instrumentRef.current.play(midiToName(midi), when, { duration });
+  setDebugInfo(`playNote -> ctx=${ctx?.state} t=${when.toFixed(2)}`);
   }, []);
 
   const scheduleCadence = useCallback((keyOverride?: string): number => {
@@ -336,11 +340,18 @@ const App: React.FC = () => {
       return;
     }
     const handler = () => { unlockAudio(); };
+    const resumeHandler = () => { if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume(); };
     document.addEventListener('touchend', handler, { once: true, passive: true });
     document.addEventListener('mousedown', handler, { once: true });
+    document.addEventListener('visibilitychange', resumeHandler);
+    window.addEventListener('focus', resumeHandler);
+    document.addEventListener('touchstart', resumeHandler, { passive: true });
     return () => {
       document.removeEventListener('touchend', handler);
       document.removeEventListener('mousedown', handler);
+      document.removeEventListener('visibilitychange', resumeHandler);
+      window.removeEventListener('focus', resumeHandler);
+      document.removeEventListener('touchstart', resumeHandler);
     };
   }, [audioUnlocked, unlockAudio]);
 
@@ -368,6 +379,12 @@ const App: React.FC = () => {
             {loadingInstrument ? 'Loading…' : (unlockAttempted ? 'Try Again' : 'Enable Audio')}
           </button>
       <p style={{marginTop:'1rem', fontSize:'0.7rem', opacity:0.8}}>If still silent: toggle mute switch, raise volume, then tap again.</p>
+      {debugInfo && <code style={{marginTop:'0.75rem', fontSize:'0.6rem', opacity:0.6}}>{debugInfo}</code>}
+      <button onClick={() => {
+        if (!audioCtxRef.current) return; const ctx = audioCtxRef.current; if (ctx.state==='suspended') ctx.resume();
+        const osc = ctx.createOscillator(); const gain = ctx.createGain(); gain.gain.value=0.05; osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime+0.25); setTimeout(()=>gain.disconnect(), 400); setDebugInfo(`testTone ctx=${ctx.state}`);
+        setAudioUnlocked(ctx.state==='running');
+      }} style={{marginTop:'0.5rem', fontSize:'0.65rem'}}>Test Tone</button>
         </div>
       )}
       <h1>Solfege Ear Trainer</h1>
