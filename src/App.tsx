@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './App.module.css';
+// Replaced range-adjustable keyboard with always-full keyboard for simpler mobile layout
 import FullKeyboardRange from './components/FullKeyboardRange';
 import { SOLFEGE_MAP, DEFAULT_LOW, DEFAULT_HIGH, keysCircle, midiToName, computeRoot } from './solfege';
 import { AudioService } from './audio/AudioService';
@@ -40,11 +41,12 @@ const App: React.FC = () => {
   // Cadence policy per requirements:
   // - Always cadence on first play or when key center changes.
   // - If autoplay ON: each cycle cadences only if repeatCadence is ON (else just notes after initial/new-key cadence).
-  // - If autoplay OFF: Play button yields one event (cadence+note if repeatCadence or first/new-key, else note only).
+  {/* Removed FullKeyboard component to avoid compile error */}
   const [repeatCadence, setRepeatCadence] = useState(true);
   const [autoPlay, setAutoPlay] = useState(true);
   // Note selection mode: diatonic only, non-diatonic only, or chromatic (both)
   const [noteMode, setNoteMode] = useState<'diatonic' | 'non' | 'chromatic'>('diatonic');
+  // Full keyboard shown; keep existing low/high state for note selection but hide UI controls
   const [lowPitch, setLowPitch] = useState(DEFAULT_LOW);
   const [highPitch, setHighPitch] = useState(DEFAULT_HIGH);
   const [cadenceSpeed, setCadenceSpeed] = useState<'slow'|'medium'|'fast'>('medium');
@@ -264,7 +266,9 @@ const App: React.FC = () => {
         <div className={`muted ${styles.muted}`}>{currentNote!=null ? midiToName(currentNote) : ''}</div>
       </div>
 
-      <div className={`card ${styles.controlsCard}`}>
+  {/* Full keyboard (range selectable) below solfege */}
+  <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} onChange={(l,h)=>{setLowPitch(l); setHighPitch(h);}} />
+  <div className={`card ${styles.controlsCard}`}>
         <div className={styles.topControls}>
           <button onClick={()=>{ if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { startSequence(); } }} disabled={loadingInstrument}>
             {isPlaying ? '■ Stop' : '▶ Play'}
@@ -274,7 +278,7 @@ const App: React.FC = () => {
           <label className={styles.inlineCheck}><input type="checkbox" checked={autoPlay} onChange={e=>{ setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay</label>
           <label className={styles.inlineCheck}><input type="checkbox" checked={repeatCadence} onChange={e=>setRepeatCadence(e.target.checked)} />Repeat cadence</label>
         </div>
-        <div className={`row ${styles.rowWrap}`}>
+  <div className={`row ${styles.rowWrap}`}>
           <div className="stack">
             <label className={styles.stackLabel}>
               <span>Note set</span>
@@ -305,12 +309,6 @@ const App: React.FC = () => {
               </select>
             </label>
           </div>
-        </div>
-        <div>
-          <fieldset className={styles.fieldset}>
-            <legend>Pitch Range (Full 88 Keys)</legend>
-            <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} onChange={(l,h)=>{setLowPitch(l); setHighPitch(h);}} />
-          </fieldset>
         </div>
       </div>
 

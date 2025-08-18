@@ -40,9 +40,9 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
   useLayoutEffect(()=>{
     if (!scrollRef.current) return;
     const el = scrollRef.current;
-    const MIN_W = 14; const IDEAL_W = 42; const LEGIBLE_W = 20; // allow smaller keys before scrolling
+    const MIN_W = 14; const IDEAL_W = 42; const LEGIBLE_W = 20; // allow smaller keys before shrink
     const compute = () => {
-      const avail = el.clientWidth - 16; // padding adjust
+      const avail = el.clientWidth; // constrained by root container now
       if (avail >= totalWhite * IDEAL_W) {
         setWhiteW(IDEAL_W);
       } else if (avail >= totalWhite * LEGIBLE_W) {
@@ -79,23 +79,7 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
   };
 
   return (
-    <div className="full-piano-wrapper breakout">
-      <div className="fp-header">
-        <div className="desktop-hint">Click (or tap) a white key near the edge you want to move. Current Range: {midiToName(low)} – {midiToName(high)}</div>
-        <div className="mobile-adjust">
-          <div>
-            <span className="lab">Low</span>
-            <button onClick={()=>adjust('low','-')} disabled={low<=A0}>-</button>
-            <button onClick={()=>adjust('low','+')} disabled={nextWhite(low)>high}>+</button>
-          </div>
-          <div>
-            <span className="lab">High</span>
-            <button onClick={()=>adjust('high','-')} disabled={prevWhite(high)<low}>-</button>
-            <button onClick={()=>adjust('high','+')} disabled={high>=C8}>+</button>
-          </div>
-        </div>
-      </div>
-      <div className="full-piano-scroll" ref={scrollRef} role="group" aria-label="Full piano 88 keys">
+    <div className="full-piano-wrapper" ref={scrollRef} role="group" aria-label="Full piano 88 keys" data-range={`${midiToName(low)}-${midiToName(high)}`}>
         <div className="full-piano" style={{ width: keyboardPixelWidth, ['--white-w' as any]: whiteW+'px' }}>
           {keys.filter(k=>k.isWhite).map(k => {
             const inRange = k.midi>=low && k.midi<=high;
@@ -119,9 +103,8 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
                    aria-label={midiToName(k.midi)} />
             );
           })}
-        </div>
-      </div>
     </div>
+  </div>
   );
 };
 
