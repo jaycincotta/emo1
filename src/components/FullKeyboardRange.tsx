@@ -102,12 +102,12 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
         {whites.map(k => {
           const inRange = k.midi>=low && k.midi<=high;
           const inDetectWindow = k.midi>=DETECT_MIN && k.midi<=DETECT_MAX;
-          const edge = k.midi===low || k.midi===high;
+          // edge highlighting removed per user request
       const active = currentNote===k.midi;
       const detected = detectedNote===k.midi;
           return (
             <div key={k.midi}
-        className={'kp white'+(inRange?' in-range':'')+(edge?' edge':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow?' out-detect':'')}
+  className={'kp white'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow?' out-detect':'')}
               onClick={()=>handleSelectWhite(k.midi)}
               data-midi={k.midi}
               aria-label={midiToName(k.midi)} />

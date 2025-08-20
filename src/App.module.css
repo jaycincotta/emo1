@@ -41,7 +41,7 @@
 	.appHeader { display:none; }
 }
 /* Global piano key styling hooks (keyboard renders plain class names) */
-:global(.kp.white.detected:not(.active)) { box-shadow:0 0 0 2px #1fb655 inset, 0 0 6px 2px rgba(31,182,85,.6); position:relative; }
+:global(.kp.white.detected:not(.active)) { background:#1fb655; box-shadow:0 0 0 1px #178d44 inset, 0 0 10px 2px rgba(31,182,85,.55); position:relative; }
 :global(.kp.black.detected:not(.active)) { background:#1fb655; box-shadow:0 0 6px 2px rgba(31,182,85,.6); }
 :global(.kp.white.out-detect) { opacity:.25; filter:grayscale(1) brightness(.85); }
 :global(.kp.black.out-detect) { opacity:.18; filter:grayscale(1) brightness(.9); }

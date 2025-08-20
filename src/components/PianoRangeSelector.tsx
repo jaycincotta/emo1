@@ -54,16 +54,14 @@ const PianoRangeSelector: React.FC<PianoRangeSelectorProps> = ({ low, high, onCh
             const rel = midi % 12;
             const isBlack = [1,3,6,8,10].includes(rel);
             const inRange = midi >= low && midi <= high;
-            const isEdge = midi === low || midi === high;
+            // Edge highlighting removed; range conveyed by greying outside keys
             return (
               <div
                 key={midi}
-                className={
-                  'piano-key ' + (isBlack? 'black':'white') + (inRange? ' in-range':'') + (isEdge? ' edge':'')
-                }
+                className={'piano-key ' + (isBlack? 'black':'white') + (inRange? ' in-range':'')}
                 onClick={()=>handleKeyClick(midi)}
                 title={midiToName(midi)}
-                aria-label={`Key ${midiToName(midi)} ${isEdge? (midi===low? 'low boundary':'high boundary'): inRange? 'inside range':''}`}
+                aria-label={`Key ${midiToName(midi)} ${inRange? 'inside range':'outside range'}`}
               >
                 <span className="vis-label">{NOTE_NAMES[midi%12].replace('#','♯')}</span>
               </div>
