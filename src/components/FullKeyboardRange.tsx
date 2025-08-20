@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useLayoutEffect, useState } from 'react';
 
-interface FullKeyboardRangeProps { low: number; high: number; currentNote: number | null; onChange: (low:number, high:number)=>void; }
+interface FullKeyboardRangeProps { low: number; high: number; currentNote: number | null; onChange: (low:number, high:number)=>void; detectedNote?: number | null; }
 
 const A0 = 21; const C8 = 108; const MIDDLE_C = 60; // C4
 const BLACKS = new Set([1,3,6,8,10]);
@@ -26,7 +26,7 @@ const segmentLow = buildSegment(A0, MIDDLE_C - 1); // A0..B3 (59)
 const segmentHigh = buildSegment(MIDDLE_C, C8); // C4..C8
 const allKeys: KeyObj[] = [...segmentLow, ...segmentHigh];
 
-const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, currentNote, onChange }) => {
+const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, currentNote, onChange, detectedNote }) => {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const [whiteW, setWhiteW] = useState(42);
   const [wrapped, setWrapped] = useState(false);
@@ -99,10 +99,11 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
         {whites.map(k => {
           const inRange = k.midi>=low && k.midi<=high;
           const edge = k.midi===low || k.midi===high;
-          const active = currentNote===k.midi;
+      const active = currentNote===k.midi;
+      const detected = detectedNote===k.midi;
           return (
             <div key={k.midi}
-              className={'kp white'+(inRange?' in-range':'')+(edge?' edge':'')+(active?' active':'')}
+        className={'kp white'+(inRange?' in-range':'')+(edge?' edge':'')+(active?' active':'')+(detected?' detected':'')}
               onClick={()=>handleSelectWhite(k.midi)}
               data-midi={k.midi}
               aria-label={midiToName(k.midi)} />
@@ -113,10 +114,11 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
           const offset = global && k.midi >= MIDDLE_C ? totalWhiteLow : 0;
           const left = (offset + prevWhiteIndex + 0.72) * whiteW;
           const inRange = k.midi>=low && k.midi<=high;
-          const active = currentNote===k.midi;
+      const active = currentNote===k.midi;
+      const detected = detectedNote===k.midi;
           return (
             <div key={k.midi}
-              className={'kp black'+(inRange?' in-range':'')+(active?' active':'')}
+        className={'kp black'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')}
               style={{ left, height: blackH }}
               data-midi={k.midi}
               aria-label={midiToName(k.midi)} />

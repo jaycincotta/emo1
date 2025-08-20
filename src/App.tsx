@@ -7,6 +7,7 @@ import { AudioService } from './audio/AudioService';
 import { useAudioUnlock } from './hooks/useAudioUnlock';
 import { useAutoplayCycle } from './hooks/useAutoplayCycle';
 import { UnlockOverlay } from './components';
+import { useInstrumentMode } from './hooks/useInstrumentMode';
 
 const App: React.FC = () => {
     const audioCtxRef = useRef<AudioContext | null>(null);
@@ -155,7 +156,7 @@ const App: React.FC = () => {
     }, [chooseRandomNote, playNote]);
 
     const { isPlaying, startSequence, stopPlayback, triggerCadence } = useAutoplayCycle({
-        autoPlay,
+        autoPlay: !instrumentLoaded ? autoPlay : (autoPlay && true),
         repeatCadence,
         autoPlaySpeed,
         scheduleCadence,
@@ -164,6 +165,19 @@ const App: React.FC = () => {
         playNote,
         instrumentLoaded,
     });
+
+    // Instrument (Live Piano) mode hook integration
+    const instrumentMode = useInstrumentMode({
+        getKeyRootMidi: () => computeRoot(keyCenterRef.current),
+        chooseRandomNote: () => chooseRandomNote(),
+        scheduleCadence: (k?: string) => scheduleCadence(k),
+        playNote: (m,d) => playNote(m,d),
+        keyCenterRef,
+        onAutoKeyChange: () => { newKeyCenter(); },
+        streakTarget: 10,
+    getAudioContext: () => audioCtxRef.current,
+    });
+    const instrumentActive = instrumentMode.active;
 
     const newKeyCenter = useCallback(() => {
         const idx = Math.floor(Math.random() * keysCircle.length);
@@ -269,55 +283,90 @@ const App: React.FC = () => {
             </div>
 
             {/* Full keyboard (range selectable) below solfege */}
-            <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} onChange={(l, h) => { setLowPitch(l); setHighPitch(h); }} />
+            <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} detectedNote={instrumentMode._lastDetectedMidi ?? undefined} onChange={(l, h) => { setLowPitch(l); setHighPitch(h); }} />
             <div className={`card ${styles.controlsCard}`}>
                 <div className={styles.topControls}>
-                    <button onClick={() => { if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { startSequence(); } }} disabled={loadingInstrument}>
-                        {isPlaying ? '■ Stop' : '▶ Play'}
-                    </button>
+                    {!instrumentActive && (
+                        <button onClick={() => { if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { startSequence(); } }} disabled={loadingInstrument}>
+                            {isPlaying ? '■ Stop' : '▶ Play'}
+                        </button>
+                    )}
                     <button className="secondary" onClick={() => triggerCadence()} disabled={currentNote == null}>Again</button>
                     <button className="secondary" onClick={() => newKeyCenter()}>New Key</button>
+                    <button className="secondary" onClick={() => { instrumentActive ? instrumentMode.stopMode() : instrumentMode.startMode(); }}>
+                        {instrumentActive ? 'Exit Live' : 'Live Piano'}
+                    </button>
                     <div className={styles.prominentToggles}>
-                        <label className={styles.prominentCheck}>
+                        {!instrumentActive && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={autoPlay} onChange={e => { setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay
-                        </label>
-                        <label className={styles.prominentCheck}>
+                        </label>}
+                        {!instrumentActive && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence
-                        </label>
+                        </label>}
+                        {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode active</div>}
+                        {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.6rem', background:'#0a4', color:'#fff', padding:'.2rem .4rem', borderRadius:4 }}>Mic</div>}
+                        {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.6rem', background:'#a00', color:'#fff', padding:'.2rem .4rem', borderRadius:4 }}>Mic Err</div>}
                     </div>
                 </div>
-                <div className={`row ${styles.rowWrap}`}>
-                    <div className="stack">
-                        <label className={styles.stackLabel}>
-                            <span>Autoplay speed</span>
-                            <select className={styles.bigSelect} value={autoPlaySpeed} onChange={e => setAutoPlaySpeed(e.target.value as any)}>
-                                <option value="slow">slow</option>
-                                <option value="medium">medium</option>
-                                <option value="fast">fast</option>
-                            </select>
-                        </label>
+                {!instrumentActive && (
+                    <div className={`row ${styles.rowWrap}`}>
+                        <div className="stack">
+                            <label className={styles.stackLabel}>
+                                <span>Autoplay speed</span>
+                                <select className={styles.bigSelect} value={autoPlaySpeed} onChange={e => setAutoPlaySpeed(e.target.value as any)}>
+                                    <option value="slow">slow</option>
+                                    <option value="medium">medium</option>
+                                    <option value="fast">fast</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div className="stack">
+                            <label className={styles.stackLabel}>
+                                <span>Cadence speed</span>
+                                <select className={styles.bigSelect} value={cadenceSpeed} onChange={e => setCadenceSpeed(e.target.value as any)}>
+                                    <option value="slow">slow</option>
+                                    <option value="medium">medium</option>
+                                    <option value="fast">fast</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div className="stack">
+                            <label className={styles.stackLabel}>
+                                <span>Note set</span>
+                                <select className={styles.bigSelect} value={noteMode} onChange={e => setNoteMode(e.target.value as any)}>
+                                    <option value="diatonic">Diatonic</option>
+                                    <option value="non">Non-diatonic</option>
+                                    <option value="chromatic">Chromatic</option>
+                                </select>
+                            </label>
+                        </div>
                     </div>
-                    <div className="stack">
-                        <label className={styles.stackLabel}>
-                            <span>Cadence speed</span>
-                            <select className={styles.bigSelect} value={cadenceSpeed} onChange={e => setCadenceSpeed(e.target.value as any)}>
-                                <option value="slow">slow</option>
-                                <option value="medium">medium</option>
-                                <option value="fast">fast</option>
-                            </select>
-                        </label>
+                )}
+                {instrumentActive && (
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode metrics">
+                        <div><strong>Attempts</strong><br />{instrumentMode.metrics.attempts}</div>
+                        <div><strong>Exact</strong><br />{instrumentMode.metrics.exactCorrect}</div>
+                        <div><strong>Near (octave)</strong><br />{instrumentMode.metrics.nearMiss}</div>
+                        <div><strong>First‑try Exact</strong><br />{instrumentMode.metrics.firstTryExact}</div>
+                        <div><strong>First‑try Near</strong><br />{instrumentMode.metrics.firstTryNearMiss}</div>
+                        <div><strong>Streak</strong><br />{instrumentMode.metrics.streak}</div>
+                        <div><strong>Key changes</strong><br />{instrumentMode.metrics.keyChanges}</div>
+                        <div><strong>Avg s/exact</strong><br />{instrumentMode.avgExactSeconds.toFixed(2)}</div>
+                                                <div style={{ minWidth:110 }}>
+                                                    <strong>Level</strong><br />
+                                                    <div style={{ background:'#243140', width:100, height:8, borderRadius:4, overflow:'hidden', position:'relative' }}>
+                                                        <div style={{ position:'absolute', inset:0, transform:`scaleX(${Math.min(1, instrumentMode.amplitude*30)})`, transformOrigin:'left', background: instrumentMode.amplitude>0.08?'#e11d48': instrumentMode.amplitude>0.04?'#f59e0b':'#10b981', transition:'transform .12s linear' }} />
+                                                    </div>
+                                                </div>
+                                                <div style={{ minWidth:150 }}>
+                                                    <strong>Mic</strong><br />
+                                                    <select style={{ fontSize:'.65rem', maxWidth:180 }} value={instrumentMode.selectedDeviceId ?? ''} onChange={(e)=>instrumentMode.changeDevice(e.target.value)}>
+                                                        {instrumentMode.devices.map(d=> <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
+                                                    </select>
+                                                </div>
+                                                {instrumentMode._lastDetectedMidi && <div><strong>Last MIDI</strong><br />{instrumentMode._lastDetectedMidi}</div>}
                     </div>
-                    <div className="stack">
-                        <label className={styles.stackLabel}>
-                            <span>Note set</span>
-                            <select className={styles.bigSelect} value={noteMode} onChange={e => setNoteMode(e.target.value as any)}>
-                                <option value="diatonic">Diatonic</option>
-                                <option value="non">Non-diatonic</option>
-                                <option value="chromatic">Chromatic</option>
-                            </select>
-                        </label>
-                    </div>
-                </div>
+                )}
             </div>
             {showInstructions && (
                 <div className={`card ${styles.instructions}`}>
