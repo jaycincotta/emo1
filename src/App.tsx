@@ -353,7 +353,25 @@ const App: React.FC = () => {
                                 {instrumentMode.devices.map(d=> <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
                             </select>
                         </div>
-                        {instrumentMode._lastDetectedMidi && <div><strong>Detected</strong><br />{instrumentMode._lastDetectedMidi}</div>}
+                                                {instrumentMode.rawMidiState && <div><strong>Raw</strong><br />{instrumentMode.rawMidiState}</div>}
+                                                {instrumentMode._lastDetectedMidi && <div><strong>Stable</strong><br />{instrumentMode._lastDetectedMidi}</div>}
+                                                <div style={{ minWidth:150 }}>
+                                                    <strong>Sensitivity</strong><br />
+                                                    <select style={{ fontSize:'.65rem' }} value={instrumentMode.sensitivity as any} onChange={e=>instrumentMode.setSensitivity(e.target.value === 'auto' ? 'auto' : Number(e.target.value) as any)}>
+                                                        <option value="auto">Auto</option>
+                                                        <option value={0}>Low (strict)</option>
+                                                        <option value={1}>Med</option>
+                                                        <option value={2}>High</option>
+                                                    </select>
+                                                </div>
+                                                <div style={{ minWidth:190 }}>
+                                                    <strong>Profile</strong><br />
+                                                    <div style={{ fontSize:'.55rem', lineHeight:1.15, opacity:.8 }}>
+                                                        {instrumentMode.sensitivityProfile.mode==='auto' && <span style={{ display:'block' }}>amb rms {instrumentMode.sensitivityProfile.ambientRms.toFixed(3)} clr {instrumentMode.sensitivityProfile.ambientClarity.toFixed(2)}</span>}
+                                                        clr {instrumentMode.sensitivityProfile.clarity.toFixed(2)} | rms {instrumentMode.sensitivityProfile.rms.toFixed(3)}<br />
+                                                        fr {instrumentMode.sensitivityProfile.frames} / {instrumentMode.sensitivityProfile.stableMs}ms | jit ±{instrumentMode.sensitivityProfile.jitterSpan}
+                                                    </div>
+                                                </div>
                     </div>
                 )}
             </div>

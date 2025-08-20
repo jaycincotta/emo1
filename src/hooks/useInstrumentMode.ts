@@ -49,8 +49,56 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
 
   const DETECT_MIN = 28; // limit to empirically reliable low end (E1)
   const DETECT_MAX = 98; // D7
-  const MIN_CLARITY = 0.82;
-  const AMP_THRESHOLD = 0.004;
+  // Sensitivity profile (0=Low strict,1=Med,2=High permissive,'auto'=adaptive)
+  type SensMode = 0 | 1 | 2 | 'auto';
+  const loadSens = (): SensMode => {
+    try {
+      const raw = localStorage.getItem('etSensitivityMode');
+      if (raw === 'auto') return 'auto';
+      if (raw != null) {
+        const n = Number(raw);
+        if ([0,1,2].includes(n)) return n as SensMode;
+      }
+    } catch { }
+    return 1;
+  };
+  const [sensitivity, setSensitivity] = useState<SensMode>(loadSens);
+  useEffect(()=>{ try { localStorage.setItem('etSensitivityMode', String(sensitivity)); } catch { } }, [sensitivity]);
+  // Base thresholds (arrays indexed by numeric modes)
+  const CLARITY_THRESHOLDS = [0.90, 0.88, 0.84];
+  const RMS_THRESHOLDS = [0.012, 0.009, 0.005];
+  const STABLE_FRAMES_THRESHOLDS = [4, 3, 2];
+  const STABLE_MS_THRESHOLDS = [120, 95, 65];
+  const JITTER_SPAN_LIMIT = [1, 1, 2]; // acceptable semitone spread in recent window
+  // Ambient baselines for auto mode
+  const ambientRmsRef = useRef<number>(0.0025);
+  const ambientClarityRef = useRef<number>(0.5);
+  const ema = (prev:number, next:number, a:number)=> prev + a*(next-prev);
+  const isAuto = sensitivity === 'auto';
+  const baseIndex = isAuto ? 1 : sensitivity; // reference to medium for auto adjustments
+  let MIN_CLARITY = CLARITY_THRESHOLDS[baseIndex];
+  let AMP_THRESHOLD = RMS_THRESHOLDS[baseIndex];
+  let REQUIRED_STABLE_FRAMES = STABLE_FRAMES_THRESHOLDS[baseIndex];
+  let REQUIRED_STABLE_MS = STABLE_MS_THRESHOLDS[baseIndex];
+  let MAX_JITTER_SPAN = JITTER_SPAN_LIMIT[baseIndex];
+  if (isAuto) {
+    const ar = ambientRmsRef.current;
+    const ac = ambientClarityRef.current;
+    AMP_THRESHOLD = Math.min(0.025, ar * 3 + 0.002); // scale with environment
+    MIN_CLARITY = Math.min(0.97, Math.max(0.86, ac + 0.25));
+    if (ar < 0.003) { // quiet room -> stricter stability
+      REQUIRED_STABLE_FRAMES = 4; REQUIRED_STABLE_MS = 130; MAX_JITTER_SPAN = 1;
+    } else if (ar > 0.015) { // noisy room -> speed up acceptance a little
+      REQUIRED_STABLE_FRAMES = 3; REQUIRED_STABLE_MS = 90; MAX_JITTER_SPAN = 2;
+    }
+  }
+  // Jitter bookkeeping
+  const recentMidiRef = useRef<number[]>([]);
+  const stableStartRef = useRef<number | null>(null);
+  // Raw candidate (pre-stability) state exposure
+  const [rawMidiState, setRawMidiState] = useState<number | null>(null);
+  const lastStableAtRef = useRef<number>(0);
+  const CLEAR_ON_IDLE_MS = 1400; // time since last stable before clearing highlight
 
   const ensureDetector = useCallback(async () => {
     if (detectorModRef.current) return;
@@ -122,17 +170,53 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
           if (clarity >= MIN_CLARITY && pitch > 40 && pitch < 2500) {
             const midi = freqToMidi(pitch);
             if (midi >= DETECT_MIN && midi <= DETECT_MAX) {
-              if (lastDetectedMidiRef.current !== midi) {
-                lastDetectedMidiRef.current = midi;
-                setDetectedMidiState(midi); // trigger re-render for highlighting
+              setRawMidiState(midi);
+              // Jitter window update
+              const recent = recentMidiRef.current;
+              recent.push(midi);
+              if (recent.length > 6) recent.shift();
+              const span = Math.max(...recent) - Math.min(...recent);
+              if (span > MAX_JITTER_SPAN) {
+                // Too unstable, reset stability timing & skip
+                stableStartRef.current = null;
+              } else {
+                // Stability timing
+                if (stableStartRef.current == null || lastDetectedMidiRef.current !== midi) {
+                  stableStartRef.current = performance.now();
+                }
+                const stableFrames = recent.length >= REQUIRED_STABLE_FRAMES && span <= MAX_JITTER_SPAN;
+                const stableTimeOk = stableStartRef.current != null && (performance.now() - stableStartRef.current) >= REQUIRED_STABLE_MS;
+                if (stableFrames && stableTimeOk) {
+                  if (lastDetectedMidiRef.current !== midi) {
+                    lastDetectedMidiRef.current = midi;
+                    setDetectedMidiState(midi);
+                      lastStableAtRef.current = performance.now();
+                  }
+                }
               }
+            }
+          } else if (isAuto) {
+            // update ambient clarity baseline with low clarity samples (speech/noise)
+            if (clarity < 0.8) {
+              ambientClarityRef.current = ema(ambientClarityRef.current, clarity, 0.04);
+              ambientRmsRef.current = ema(ambientRmsRef.current, rms, 0.05);
             }
           }
         } catch { }
+      } else if (isAuto) {
+        // below amplitude gate => treat as ambient noise sample
+        ambientRmsRef.current = ema(ambientRmsRef.current, rms, 0.02);
+      }
+      // Idle clearing logic: no stable update recently & low amplitude
+      const sinceStable = performance.now() - lastStableAtRef.current;
+      if (lastStableAtRef.current && sinceStable > CLEAR_ON_IDLE_MS && rms < AMP_THRESHOLD*0.5) {
+        lastStableAtRef.current = 0;
+        lastDetectedMidiRef.current = null;
+        setDetectedMidiState(null);
       }
     }
     detectTimerRef.current = requestAnimationFrame(detectionStep);
-  }, [AMP_THRESHOLD, MIN_CLARITY]);
+  }, [AMP_THRESHOLD, MIN_CLARITY, REQUIRED_STABLE_FRAMES, REQUIRED_STABLE_MS, MAX_JITTER_SPAN, isAuto]);
 
   const startDetectionLoop = useCallback(() => {
     stopDetectionLoop();
@@ -184,5 +268,18 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
   detectedMidiState,
     changeDevice: async (deviceId: string) => { await initMic(deviceId); },
     detectionWindow: { min: DETECT_MIN, max: DETECT_MAX },
+    sensitivity,
+    setSensitivity: (v: SensMode)=> setSensitivity(v),
+    rawMidiState,
+    sensitivityProfile: {
+      mode: sensitivity,
+      clarity: MIN_CLARITY,
+      rms: AMP_THRESHOLD,
+      frames: REQUIRED_STABLE_FRAMES,
+      stableMs: REQUIRED_STABLE_MS,
+      jitterSpan: MAX_JITTER_SPAN,
+      ambientRms: ambientRmsRef.current,
+      ambientClarity: ambientClarityRef.current,
+    }
   };
 }
