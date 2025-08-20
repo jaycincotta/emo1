@@ -44,10 +44,11 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
   const detectTimerRef = useRef<number | null>(null);
   const pitchDetectorRef = useRef<any>(null);
   const lastDetectedMidiRef = useRef<number | null>(null);
+  const [detectedMidiState, setDetectedMidiState] = useState<number | null>(null);
   const lastAmpUpdateRef = useRef<number>(0);
 
-  const DETECT_MIN = 21;
-  const DETECT_MAX = 108;
+  const DETECT_MIN = 28; // limit to empirically reliable low end (E1)
+  const DETECT_MAX = 98; // D7
   const MIN_CLARITY = 0.82;
   const AMP_THRESHOLD = 0.004;
 
@@ -121,7 +122,10 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
           if (clarity >= MIN_CLARITY && pitch > 40 && pitch < 2500) {
             const midi = freqToMidi(pitch);
             if (midi >= DETECT_MIN && midi <= DETECT_MAX) {
-              lastDetectedMidiRef.current = midi;
+              if (lastDetectedMidiRef.current !== midi) {
+                lastDetectedMidiRef.current = midi;
+                setDetectedMidiState(midi); // trigger re-render for highlighting
+              }
             }
           }
         } catch { }
@@ -177,6 +181,7 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
     startMode,
     stopMode,
     _lastDetectedMidi: lastDetectedMidiRef.current,
+  detectedMidiState,
     changeDevice: async (deviceId: string) => { await initMic(deviceId); },
     detectionWindow: { min: DETECT_MIN, max: DETECT_MAX },
   };
