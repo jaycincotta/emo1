@@ -99,6 +99,7 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
   const [rawMidiState, setRawMidiState] = useState<number | null>(null);
   const lastStableAtRef = useRef<number>(0);
   const CLEAR_ON_IDLE_MS = 1400; // time since last stable before clearing highlight
+  const [effectiveMidi, setEffectiveMidi] = useState<number | null>(null);
 
   const ensureDetector = useCallback(async () => {
     if (detectorModRef.current) return;
@@ -181,7 +182,8 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
                 stableStartRef.current = null;
               } else {
                 // Stability timing
-                if (stableStartRef.current == null || lastDetectedMidiRef.current !== midi) {
+                // Only reset stability timer if it's the first frame OR we already had a prior stable note and midi changed.
+                if (stableStartRef.current == null || (lastDetectedMidiRef.current !== null && lastDetectedMidiRef.current !== midi)) {
                   stableStartRef.current = performance.now();
                 }
                 const stableFrames = recent.length >= REQUIRED_STABLE_FRAMES && span <= MAX_JITTER_SPAN;
@@ -213,6 +215,19 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
         lastStableAtRef.current = 0;
         lastDetectedMidiRef.current = null;
         setDetectedMidiState(null);
+      }
+      // Effective note logic: prefer stable; else if raw present for >150ms and no stable yet, use raw
+      const stable = lastDetectedMidiRef.current;
+      if (stable !== null) {
+        if (effectiveMidi !== stable) setEffectiveMidi(stable);
+      } else if (rawMidiState != null) {
+        // Use timestamp encoded in recentMidiRef length growth start
+        if (!stableStartRef.current) stableStartRef.current = performance.now();
+        if (performance.now() - stableStartRef.current > 150 && effectiveMidi !== rawMidiState) {
+          setEffectiveMidi(rawMidiState);
+        }
+      } else if (effectiveMidi !== null) {
+        setEffectiveMidi(null);
       }
     }
     detectTimerRef.current = requestAnimationFrame(detectionStep);
@@ -270,7 +285,8 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
     detectionWindow: { min: DETECT_MIN, max: DETECT_MAX },
     sensitivity,
     setSensitivity: (v: SensMode)=> setSensitivity(v),
-    rawMidiState,
+  rawMidiState,
+  effectiveMidi,
     sensitivityProfile: {
       mode: sensitivity,
       clarity: MIN_CLARITY,

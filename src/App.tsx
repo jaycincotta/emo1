@@ -278,7 +278,7 @@ const App: React.FC = () => {
                             low={instrumentActive ? instrumentMode.detectionWindow.min : lowPitch}
                             high={instrumentActive ? instrumentMode.detectionWindow.max : highPitch}
                             currentNote={instrumentActive ? null : currentNote}
-                            detectedNote={instrumentActive ? (instrumentMode.detectedMidiState ?? undefined) : undefined}
+                            detectedNote={instrumentActive ? (instrumentMode.effectiveMidi ?? instrumentMode.detectedMidiState ?? undefined) : undefined}
                             onChange={(l, h) => { if (!instrumentActive) { setLowPitch(l); setHighPitch(h); } }}
                         />
             <div className={`card ${styles.controlsCard}`}>
