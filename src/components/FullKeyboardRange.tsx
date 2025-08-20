@@ -26,6 +26,9 @@ const segmentLow = buildSegment(A0, MIDDLE_C - 1); // A0..B3 (59)
 const segmentHigh = buildSegment(MIDDLE_C, C8); // C4..C8
 const allKeys: KeyObj[] = [...segmentLow, ...segmentHigh];
 
+const DETECT_MIN = 28;
+const DETECT_MAX = 98;
+
 const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, currentNote, onChange, detectedNote }) => {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const [whiteW, setWhiteW] = useState(42);
@@ -98,12 +101,13 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
       <div className="full-piano" style={{ width: rowWidth, ['--white-w' as any]: whiteW+'px', height: whiteH }}>
         {whites.map(k => {
           const inRange = k.midi>=low && k.midi<=high;
+          const inDetectWindow = k.midi>=DETECT_MIN && k.midi<=DETECT_MAX;
           const edge = k.midi===low || k.midi===high;
       const active = currentNote===k.midi;
       const detected = detectedNote===k.midi;
           return (
             <div key={k.midi}
-        className={'kp white'+(inRange?' in-range':'')+(edge?' edge':'')+(active?' active':'')+(detected?' detected':'')}
+        className={'kp white'+(inRange?' in-range':'')+(edge?' edge':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow?' out-detect':'')}
               onClick={()=>handleSelectWhite(k.midi)}
               data-midi={k.midi}
               aria-label={midiToName(k.midi)} />
@@ -114,11 +118,12 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
           const offset = global && k.midi >= MIDDLE_C ? totalWhiteLow : 0;
           const left = (offset + prevWhiteIndex + 0.72) * whiteW;
           const inRange = k.midi>=low && k.midi<=high;
+          const inDetectWindow = k.midi>=DETECT_MIN && k.midi<=DETECT_MAX;
       const active = currentNote===k.midi;
       const detected = detectedNote===k.midi;
           return (
             <div key={k.midi}
-        className={'kp black'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')}
+        className={'kp black'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow?' out-detect':'')}
               style={{ left, height: blackH }}
               data-midi={k.midi}
               aria-label={midiToName(k.midi)} />
