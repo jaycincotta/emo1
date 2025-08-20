@@ -40,8 +40,12 @@
 @media (orientation:landscape) and (max-height:520px){
 	.appHeader { display:none; }
 }
-.kp.white.detected:not(.active) { box-shadow:0 0 0 2px #1fb655 inset, 0 0 6px 2px rgba(31,182,85,.6); }
-.kp.black.detected:not(.active) { background:#1fb655; box-shadow:0 0 6px 2px rgba(31,182,85,.6); }
-.kp.white.out-detect { opacity:.25; filter:grayscale(1) brightness(.85); }
-.kp.black.out-detect { opacity:.18; filter:grayscale(1) brightness(.9); }
-.kp.white.out-detect.detected, .kp.black.out-detect.detected { /* if detection outside window ever occurs, still show */ opacity:.6; filter:none; }
+/* Global piano key styling hooks (keyboard renders plain class names) */
+:global(.kp.white.detected:not(.active)) { box-shadow:0 0 0 2px #1fb655 inset, 0 0 6px 2px rgba(31,182,85,.6); position:relative; }
+:global(.kp.black.detected:not(.active)) { background:#1fb655; box-shadow:0 0 6px 2px rgba(31,182,85,.6); }
+:global(.kp.white.out-detect) { opacity:.25; filter:grayscale(1) brightness(.85); }
+:global(.kp.black.out-detect) { opacity:.18; filter:grayscale(1) brightness(.9); }
+:global(.kp.white.out-detect.detected), :global(.kp.black.out-detect.detected) { opacity:.6; filter:none; }
+/* Subtle pulse for detected note */
+@keyframes detectedPulse { 0%{filter:brightness(1);} 50%{filter:brightness(1.25);} 100%{filter:brightness(1);} }
+:global(.kp.white.detected:not(.active)), :global(.kp.black.detected:not(.active)) { animation:detectedPulse 1.2s ease-in-out infinite; }
