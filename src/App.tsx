@@ -167,16 +167,7 @@ const App: React.FC = () => {
     });
 
     // Instrument (Live Piano) mode hook integration
-    const instrumentMode = useInstrumentMode({
-        getKeyRootMidi: () => computeRoot(keyCenterRef.current),
-        chooseRandomNote: () => chooseRandomNote(),
-        scheduleCadence: (k?: string) => scheduleCadence(k),
-        playNote: (m,d) => playNote(m,d),
-        keyCenterRef,
-        onAutoKeyChange: () => { newKeyCenter(); },
-        streakTarget: 10,
-    getAudioContext: () => audioCtxRef.current,
-    });
+    const instrumentMode = useInstrumentMode({ keyCenterRef, getAudioContext: () => audioCtxRef.current });
     const instrumentActive = instrumentMode.active;
 
     const newKeyCenter = useCallback(() => {
@@ -286,7 +277,7 @@ const App: React.FC = () => {
                         <FullKeyboardRange
                             low={instrumentActive ? instrumentMode.detectionWindow.min : lowPitch}
                             high={instrumentActive ? instrumentMode.detectionWindow.max : highPitch}
-                            currentNote={currentNote}
+                            currentNote={instrumentActive ? null : currentNote}
                             detectedNote={instrumentMode._lastDetectedMidi ?? undefined}
                             onChange={(l, h) => { if (!instrumentActive) { setLowPitch(l); setHighPitch(h); } }}
                         />
@@ -297,8 +288,8 @@ const App: React.FC = () => {
                             {isPlaying ? '■ Stop' : '▶ Play'}
                         </button>
                     )}
-                    <button className="secondary" onClick={() => triggerCadence()} disabled={currentNote == null}>Again</button>
-                    <button className="secondary" onClick={() => newKeyCenter()}>New Key</button>
+                    {!instrumentActive && <button className="secondary" onClick={() => triggerCadence()} disabled={currentNote == null}>Again</button>}
+                    {!instrumentActive && <button className="secondary" onClick={() => newKeyCenter()}>New Key</button>}
                     <button className="secondary" onClick={() => { instrumentActive ? instrumentMode.stopMode() : instrumentMode.startMode(); }}>
                         {instrumentActive ? 'Exit Live' : 'Live Piano'}
                     </button>
@@ -310,13 +301,8 @@ const App: React.FC = () => {
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence
                         </label>}
                                                 {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>}
-                                                {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
-                                                {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.55rem', background:'#a00', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic Err</div>}
-                                                                        {instrumentActive && instrumentMode._lastClassifiedType && (
-                                                                            <div style={{ fontSize:'.6rem', padding:'.28rem .55rem', borderRadius:6, fontWeight:600, background: instrumentMode._lastClassifiedType==='exact'? 'linear-gradient(135deg,#059669,#10b981)': instrumentMode._lastClassifiedType==='near'? 'linear-gradient(135deg,#b45309,#d97706)': 'linear-gradient(135deg,#991b1b,#dc2626)', boxShadow:'0 0 0 1px rgba(255,255,255,.08),0 2px 4px -1px rgba(0,0,0,.5)', letterSpacing:.5 }}>
-                                                                                {instrumentMode._lastClassifiedType==='exact' ? 'Exact' : instrumentMode._lastClassifiedType==='near' ? 'Near (octave)' : 'Wrong'}
-                                                                            </div>
-                                                                        )}
+                        {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
+                        {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.55rem', background:'#a00', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic Err</div>}
                     </div>
                 </div>
                 {!instrumentActive && (
@@ -354,29 +340,20 @@ const App: React.FC = () => {
                     </div>
                 )}
                 {instrumentActive && (
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode metrics">
-                        <div><strong>Attempts</strong><br />{instrumentMode.metrics.attempts}</div>
-                        <div><strong>Exact</strong><br />{instrumentMode.metrics.exactCorrect}</div>
-                        <div><strong>Near (octave)</strong><br />{instrumentMode.metrics.nearMiss}</div>
-                        <div><strong>First‑try Exact</strong><br />{instrumentMode.metrics.firstTryExact}</div>
-                        <div><strong>First‑try Near</strong><br />{instrumentMode.metrics.firstTryNearMiss}</div>
-                        <div><strong>Streak</strong><br />{instrumentMode.metrics.streak}</div>
-                        <div><strong>Key changes</strong><br />{instrumentMode.metrics.keyChanges}</div>
-                        <div><strong>Avg s/exact</strong><br />{instrumentMode.avgExactSeconds.toFixed(2)}</div>
-                                                <div style={{ minWidth:110 }}>
-                                                    <strong>Level</strong><br />
-                                                    <div style={{ background:'#243140', width:100, height:8, borderRadius:4, overflow:'hidden', position:'relative' }}>
-                                                        <div style={{ position:'absolute', inset:0, transform:`scaleX(${Math.min(1, instrumentMode.amplitude*30)})`, transformOrigin:'left', background: instrumentMode.amplitude>0.08?'#e11d48': instrumentMode.amplitude>0.04?'#f59e0b':'#10b981', transition:'transform .12s linear' }} />
-                                                    </div>
-                                                </div>
-                                                <div style={{ minWidth:150 }}>
-                                                    <strong>Mic</strong><br />
-                                                    <select style={{ fontSize:'.65rem', maxWidth:180 }} value={instrumentMode.selectedDeviceId ?? ''} onChange={(e)=>instrumentMode.changeDevice(e.target.value)}>
-                                                        {instrumentMode.devices.map(d=> <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
-                                                    </select>
-                                                </div>
-                                                {instrumentMode._lastDetectedMidi && <div><strong>Last MIDI</strong><br />{instrumentMode._lastDetectedMidi}</div>}
-                                                {instrumentMode._lastClassifiedMidi && <div><strong>Classified</strong><br />{instrumentMode._lastClassifiedMidi}</div>}
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode">
+                        <div style={{ minWidth:110 }}>
+                            <strong>Level</strong><br />
+                            <div style={{ background:'#243140', width:100, height:8, borderRadius:4, overflow:'hidden', position:'relative' }}>
+                                <div style={{ position:'absolute', inset:0, transform:`scaleX(${Math.min(1, instrumentMode.amplitude*30)})`, transformOrigin:'left', background: instrumentMode.amplitude>0.08?'#e11d48': instrumentMode.amplitude>0.04?'#f59e0b':'#10b981', transition:'transform .12s linear' }} />
+                            </div>
+                        </div>
+                        <div style={{ minWidth:150 }}>
+                            <strong>Mic</strong><br />
+                            <select style={{ fontSize:'.65rem', maxWidth:180 }} value={instrumentMode.selectedDeviceId ?? ''} onChange={(e)=>instrumentMode.changeDevice(e.target.value)}>
+                                {instrumentMode.devices.map(d=> <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
+                            </select>
+                        </div>
+                        {instrumentMode._lastDetectedMidi && <div><strong>Detected</strong><br />{instrumentMode._lastDetectedMidi}</div>}
                     </div>
                 )}
             </div>
