@@ -283,7 +283,13 @@ const App: React.FC = () => {
             </div>
 
             {/* Full keyboard (range selectable) below solfege */}
-            <FullKeyboardRange low={lowPitch} high={highPitch} currentNote={currentNote} detectedNote={instrumentMode._lastDetectedMidi ?? undefined} onChange={(l, h) => { setLowPitch(l); setHighPitch(h); }} />
+                        <FullKeyboardRange
+                            low={instrumentActive ? instrumentMode.detectionWindow.min : lowPitch}
+                            high={instrumentActive ? instrumentMode.detectionWindow.max : highPitch}
+                            currentNote={currentNote}
+                            detectedNote={instrumentMode._lastDetectedMidi ?? undefined}
+                            onChange={(l, h) => { if (!instrumentActive) { setLowPitch(l); setHighPitch(h); } }}
+                        />
             <div className={`card ${styles.controlsCard}`}>
                 <div className={styles.topControls}>
                     {!instrumentActive && (
@@ -303,9 +309,14 @@ const App: React.FC = () => {
                         {!instrumentActive && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence
                         </label>}
-                        {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode active</div>}
-                        {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.6rem', background:'#0a4', color:'#fff', padding:'.2rem .4rem', borderRadius:4 }}>Mic</div>}
-                        {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.6rem', background:'#a00', color:'#fff', padding:'.2rem .4rem', borderRadius:4 }}>Mic Err</div>}
+                                                {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>}
+                                                {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
+                                                {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.55rem', background:'#a00', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic Err</div>}
+                                                                        {instrumentActive && instrumentMode._lastClassifiedType && (
+                                                                            <div style={{ fontSize:'.6rem', padding:'.28rem .55rem', borderRadius:6, fontWeight:600, background: instrumentMode._lastClassifiedType==='exact'? 'linear-gradient(135deg,#059669,#10b981)': instrumentMode._lastClassifiedType==='near'? 'linear-gradient(135deg,#b45309,#d97706)': 'linear-gradient(135deg,#991b1b,#dc2626)', boxShadow:'0 0 0 1px rgba(255,255,255,.08),0 2px 4px -1px rgba(0,0,0,.5)', letterSpacing:.5 }}>
+                                                                                {instrumentMode._lastClassifiedType==='exact' ? 'Exact' : instrumentMode._lastClassifiedType==='near' ? 'Near (octave)' : 'Wrong'}
+                                                                            </div>
+                                                                        )}
                     </div>
                 </div>
                 {!instrumentActive && (
@@ -365,6 +376,7 @@ const App: React.FC = () => {
                                                     </select>
                                                 </div>
                                                 {instrumentMode._lastDetectedMidi && <div><strong>Last MIDI</strong><br />{instrumentMode._lastDetectedMidi}</div>}
+                                                {instrumentMode._lastClassifiedMidi && <div><strong>Classified</strong><br />{instrumentMode._lastClassifiedMidi}</div>}
                     </div>
                 )}
             </div>

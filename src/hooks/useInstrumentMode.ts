@@ -82,6 +82,13 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
   const pitchDetectorRef = useRef<any>(null);
   const lastDetectedMidiRef = useRef<number | null>(null);
   const lastAmpUpdateRef = useRef<number>(0);
+  const lastClassifiedMidiRef = useRef<number | null>(null);
+  const lastClassifiedTypeRef = useRef<'exact'|'near'|'wrong'|null>(null);
+  const classifyClearTimerRef = useRef<number | null>(null);
+
+  // Empirical usable detection window (pitchy + mic path); adjust if library improvements expand range
+  const DETECT_MIN = 28; // ~E1 (library reports this as lowest reliably detected on user's piano)
+  const DETECT_MAX = 98; // ~D7 highest reliably detected
 
   // Configurable thresholds (could expose later)
   const STABLE_FRAMES = 3; // required consecutive identical midi estimates
@@ -247,7 +254,12 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
   if ((window as any).__DEBUG_PITCH) console.debug('[live] cadence length sec', cadenceLen);
     // choose target after cadence delay
     setTimeout(() => {
-      const note = chooseRandomNote();
+      let note = chooseRandomNote();
+      let guard = 0;
+      while (note != null && (note < DETECT_MIN || note > DETECT_MAX) && guard < 50) { note = chooseRandomNote(); guard++; }
+      if (note != null && (note < DETECT_MIN || note > DETECT_MAX)) {
+        note = Math.min(DETECT_MAX, Math.max(DETECT_MIN, note));
+      }
       if (note != null) {
         playNote(note, 1.4);
         targetStartRef.current = performance.now();
@@ -290,6 +302,12 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
       if (exact) newMetrics.streak += 1; else newMetrics.streak = 0;
       // After exact, advance to next note (and maybe key change)
       let nextState: InstrumentModeState = { ...s, metrics: newMetrics };
+      lastClassifiedMidiRef.current = playedMidi;
+      lastClassifiedTypeRef.current = exact ? 'exact' : (sameSyllable ? 'near' : 'wrong');
+      if (classifyClearTimerRef.current) { clearTimeout(classifyClearTimerRef.current); classifyClearTimerRef.current = null; }
+      classifyClearTimerRef.current = window.setTimeout(() => {
+        lastClassifiedMidiRef.current = null; lastClassifiedTypeRef.current = null; setState(s2 => ({ ...s2 }));
+      }, 1300);
       if (exact) {
         // auto key change on streak
         if (newMetrics.streak >= streakTarget) {
@@ -298,7 +316,10 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
         }
         // schedule next target
         setTimeout(() => {
-          const note = chooseRandomNote();
+          let note = chooseRandomNote();
+          let guard = 0;
+          while (note != null && (note < DETECT_MIN || note > DETECT_MAX) && guard < 50) { note = chooseRandomNote(); guard++; }
+          if (note != null && (note < DETECT_MIN || note > DETECT_MAX)) { note = Math.min(DETECT_MAX, Math.max(DETECT_MIN, note)); }
           if (note != null) {
             const cadenceAgainLen = scheduleCadence(nextState.modeKey);
             setTimeout(() => {
@@ -344,5 +365,8 @@ export function useInstrumentMode(opts: UseInstrumentModeOptions) {
     changeDevice: async (deviceId: string) => {
       await initMic(deviceId);
     },
+  _lastClassifiedMidi: lastClassifiedMidiRef.current,
+  _lastClassifiedType: lastClassifiedTypeRef.current,
+  detectionWindow: { min: 28, max: 98 },
   };
 }
