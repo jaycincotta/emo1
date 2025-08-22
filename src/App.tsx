@@ -181,6 +181,8 @@ const App: React.FC = () => {
     const [liveStreak, setLiveStreak] = useState(0); // streak of first-attempt correct targets
     const [liveCongrats, setLiveCongrats] = useState(false);
     const [liveSyllable, setLiveSyllable] = useState<string>('');
+    const [liveStrict, setLiveStrict] = useState(true); // if false: octave (near) does not break streak
+    const [liveRepeatCadence, setLiveRepeatCadence] = useState(true); // repeat cadence between targets
     const evaluationDisableUntilRef = useRef<number>(0); // timestamp until which we ignore detections (during cadence/target playback)
     const lastEvaluatedMidiRef = useRef<number | null>(null); // to avoid re-evaluating same sustained note
     const lastDetectedNullAtRef = useRef<number>(performance.now());
@@ -219,7 +221,7 @@ const App: React.FC = () => {
     }, [highPitch, lowPitch, noteMode, instrumentMode.detectionWindow.min, instrumentMode.detectionWindow.max]);
 
     // Start a new target (schedules cadence + target note playback)
-    const startNewLiveTarget = useCallback((reuseSame = false) => {
+    const startNewLiveTarget = useCallback((reuseSame = false, suppressCadence = false) => {
         const doStart = (targetMidi: number) => {
             setLiveTarget(targetMidi);
             setLiveFeedback('awaiting');
@@ -231,21 +233,26 @@ const App: React.FC = () => {
         const tgt = reuseSame ? liveTarget : chooseLiveTarget();
         if (tgt == null) return;
         if (!reuseSame) {
-            // metrics: each BRAND NEW target increases totalTargets
             setLiveTotalTargets(t => t + 1);
         }
-        // schedule cadence then note
-        const cadenceSeconds = scheduleCadence();
-        const startTime = performance.now();
-        evaluationDisableUntilRef.current = startTime + cadenceSeconds * 1000 + 1500; // disable until note has sounded and decayed a bit
-        // set target immediately so UI knows what's awaited
         doStart(tgt);
-        // play target after cadence ends
-        setTimeout(() => {
-            playNote(tgt, 1.4);
-            // after short delay, allow evaluation (but keep guard if user is still hearing note from speakers)
-            evaluationDisableUntilRef.current = performance.now() + PROVISIONAL_NOTE_DELAY_MS + 650; // allow earlier detection but still buffer
-        }, cadenceSeconds * 1000 + 120);
+        if (!suppressCadence) {
+            const cadenceSeconds = scheduleCadence();
+            const startTime = performance.now();
+            evaluationDisableUntilRef.current = startTime + cadenceSeconds * 1000 + 1500;
+            setTimeout(() => {
+                playNote(tgt, 1.4);
+                evaluationDisableUntilRef.current = performance.now() + PROVISIONAL_NOTE_DELAY_MS + 650;
+            }, cadenceSeconds * 1000 + 120);
+        } else {
+            // direct target note without cadence
+            const blockMs = 550;
+            evaluationDisableUntilRef.current = performance.now() + blockMs;
+            setTimeout(() => {
+                playNote(tgt, 1.4);
+                evaluationDisableUntilRef.current = performance.now() + PROVISIONAL_NOTE_DELAY_MS + 650;
+            }, 80);
+        }
     }, [chooseLiveTarget, scheduleCadence, playNote, liveTarget]);
 
     // Handle detection evaluation in live mode
@@ -291,17 +298,21 @@ const App: React.FC = () => {
                             // change key
                             newKeyCenter();
                             setLiveStreak(0);
-                            startNewLiveTarget(false);
+                            startNewLiveTarget(false, !liveRepeatCadence);
                         }, 2200);
                     } else {
-                        startNewLiveTarget(false);
+                        startNewLiveTarget(false, !liveRepeatCadence);
                     }
                 }, 850);
             } else {
                 // Not correct on first attempt
-                if (sameDegreeDifferentOctave) setLiveFeedback('near'); else setLiveFeedback('wrong');
-                // streak broken
-                if (liveStreak !== 0) setLiveStreak(0);
+                if (sameDegreeDifferentOctave) {
+                    setLiveFeedback('near');
+                    if (liveStrict && liveStreak !== 0) setLiveStreak(0);
+                } else {
+                    setLiveFeedback('wrong');
+                    if (liveStreak !== 0) setLiveStreak(0);
+                }
             }
         } else {
             // Second (or later) attempt on this same target
@@ -310,16 +321,16 @@ const App: React.FC = () => {
                 setLiveFeedback('correct');
                 setLiveSyllable(solfInfo ? solfInfo.syllable : '');
                 // Do NOT increment streak or metrics (first attempt already counted)
-                setTimeout(() => startNewLiveTarget(false), 900);
+                setTimeout(() => startNewLiveTarget(false, !liveRepeatCadence), 900);
             } else {
                 // Another wrong; if this is second attempt since last feedback change (i.e., attemptsOnCurrent >=2 and current attempt still wrong), replay cadence & same note
                 if (liveAttemptsOnCurrent + 1 >= 2) {
-                    // repeat cadence and same target; do not create new metrics entry
-                    startNewLiveTarget(true);
+                    // repeat same target; cadence optional
+                    startNewLiveTarget(true, !liveRepeatCadence);
                 }
             }
         }
-    }, [instrumentActive, instrumentMode.detectedMidiState, liveTarget, liveFeedback, liveFirstAttemptRecorded, liveAttemptsOnCurrent, liveStreak, startNewLiveTarget, keyCenterRef]);
+    }, [instrumentActive, instrumentMode.detectedMidiState, liveTarget, liveFeedback, liveFirstAttemptRecorded, liveAttemptsOnCurrent, liveStreak, startNewLiveTarget, keyCenterRef, liveStrict, liveRepeatCadence]);
 
     // When entering live mode, initialize workflow
     useEffect(() => {
@@ -458,6 +469,12 @@ const App: React.FC = () => {
                         <div style={{fontSize:'.65rem',marginLeft:4}}>Streak {liveStreak}/10</div>
                     </div>
                     <div style={{fontSize:'.65rem',opacity:.8}}>First-attempt: {(liveFirstAttemptCorrectCount)}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)</div>
+                    <label className={styles.prominentCheck} style={{fontSize:'.65rem',padding:'.3rem .6rem'}}>
+                        <input type="checkbox" checked={liveStrict} onChange={e=>setLiveStrict(e.target.checked)} />Strict
+                    </label>
+                    <label className={styles.prominentCheck} style={{fontSize:'.65rem',padding:'.3rem .6rem'}}>
+                        <input type="checkbox" checked={liveRepeatCadence} onChange={e=>setLiveRepeatCadence(e.target.checked)} />Repeat cadence
+                    </label>
                     {liveCongrats && <div style={{fontSize:'.75rem',background:'#2563eb',padding:'.35rem .55rem',borderRadius:4}}>Key change incoming…</div>}
                 </div>
             )}
@@ -492,7 +509,17 @@ const App: React.FC = () => {
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence
                         </label>}
                                                 {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>}
-                        {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
+                                                {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
+                                                {instrumentActive && (
+                                                    <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
+                                                        <input type="checkbox" checked={liveStrict} onChange={e=>setLiveStrict(e.target.checked)} />Strict
+                                                    </label>
+                                                )}
+                                                {instrumentActive && (
+                                                    <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
+                                                        <input type="checkbox" checked={liveRepeatCadence} onChange={e=>setLiveRepeatCadence(e.target.checked)} />Repeat cadence
+                                                    </label>
+                                                )}
                         {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.55rem', background:'#a00', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic Err</div>}
                     </div>
                 </div>
