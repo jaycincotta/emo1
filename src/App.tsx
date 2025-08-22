@@ -184,7 +184,7 @@ const App: React.FC = () => {
     const evaluationDisableUntilRef = useRef<number>(0); // timestamp until which we ignore detections (during cadence/target playback)
     const lastEvaluatedMidiRef = useRef<number | null>(null); // to avoid re-evaluating same sustained note
     const lastDetectedNullAtRef = useRef<number>(performance.now());
-    const NEAR_MISS_DISTANCE = 1; // semitone threshold for Near Miss
+    // 'Near' (orange) now represents correct scale degree in a different octave
     const PROVISIONAL_NOTE_DELAY_MS = 200; // wait after target note playback begins before enabling detection buffer
 
     const resetLiveState = useCallback(() => {
@@ -265,11 +265,13 @@ const App: React.FC = () => {
         if (stable === lastEvaluatedMidiRef.current) return; // ignore sustained duplicates
         lastEvaluatedMidiRef.current = stable;
 
-        // Evaluate attempt
-        const distance = Math.abs(stable - liveTarget);
-        const root = computeRoot(keyCenterRef.current);
-        const rel = (liveTarget - root + 1200) % 12;
-        const solfInfo = SOLFEGE_MAP[rel as keyof typeof SOLFEGE_MAP];
+    // Evaluate attempt
+    const root = computeRoot(keyCenterRef.current);
+    const targetRel = (liveTarget - root + 1200) % 12;
+    const userRel = (stable - root + 1200) % 12;
+    const sameDegreeDifferentOctave = (stable !== liveTarget) && (userRel === targetRel);
+    const distance = Math.abs(stable - liveTarget); // still used for other logic (exact match check)
+    const solfInfo = SOLFEGE_MAP[targetRel as keyof typeof SOLFEGE_MAP];
         if (!liveFirstAttemptRecorded) {
             // First attempt at this target
             setLiveAttemptsOnCurrent(a => a + 1);
@@ -297,11 +299,7 @@ const App: React.FC = () => {
                 }, 850);
             } else {
                 // Not correct on first attempt
-                if (distance <= NEAR_MISS_DISTANCE) {
-                    setLiveFeedback('near');
-                } else {
-                    setLiveFeedback('wrong');
-                }
+                if (sameDegreeDifferentOctave) setLiveFeedback('near'); else setLiveFeedback('wrong');
                 // streak broken
                 if (liveStreak !== 0) setLiveStreak(0);
             }
@@ -448,7 +446,7 @@ const App: React.FC = () => {
                     <div style={{fontSize:'1.15rem',fontWeight:600,minWidth:120}}>
                         {liveFeedback==='awaiting' && 'Play the note'}
                         {liveFeedback==='correct' && 'Correct'}
-                        {liveFeedback==='near' && 'Near Miss'}
+                        {liveFeedback==='near' && 'Wrong Octave'}
                         {liveFeedback==='wrong' && 'Try Again'}
                         {liveFeedback==='idle' && '…'}
                     </div>
