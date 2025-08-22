@@ -494,15 +494,26 @@ const App: React.FC = () => {
             )}
 
             {/* Full keyboard (range selectable) below solfege */}
-            <div className={liveFeedback==='near' ? 'quality-near' : liveFeedback==='wrong' ? 'quality-wrong' : liveFeedback==='correct' ? 'quality-correct' : ''}>
-                <FullKeyboardRange
-                    low={instrumentActive ? instrumentMode.detectionWindow.min : lowPitch}
-                    high={instrumentActive ? instrumentMode.detectionWindow.max : highPitch}
-                    currentNote={instrumentActive ? null : currentNote}
-                    detectedNote={instrumentActive ? (instrumentMode.effectiveMidi ?? instrumentMode.detectedMidiState ?? undefined) : undefined}
-                    onChange={(l, h) => { if (!instrumentActive) { setLowPitch(l); setHighPitch(h); } }}
-                />
-            </div>
+            {(() => {
+                const detMin = instrumentMode.detectionWindow.min;
+                const detMax = instrumentMode.detectionWindow.max;
+                let liveLow = instrumentActive ? Math.max(lowPitch, detMin) : lowPitch;
+                let liveHigh = instrumentActive ? Math.min(highPitch, detMax) : highPitch;
+                if (instrumentActive && liveLow > liveHigh) { // no overlap -> fallback to detection window
+                    liveLow = detMin; liveHigh = detMax;
+                }
+                return (
+                    <div className={liveFeedback==='near' ? 'quality-near' : liveFeedback==='wrong' ? 'quality-wrong' : liveFeedback==='correct' ? 'quality-correct' : ''}>
+                        <FullKeyboardRange
+                            low={liveLow}
+                            high={liveHigh}
+                            currentNote={instrumentActive ? null : currentNote}
+                            detectedNote={instrumentActive ? (instrumentMode.effectiveMidi ?? instrumentMode.detectedMidiState ?? undefined) : undefined}
+                            onChange={(l, h) => { if (!instrumentActive) { setLowPitch(l); setHighPitch(h); } }}
+                        />
+                    </div>
+                );
+            })()}
             <div className={`card ${styles.controlsCard}`}>
                 <div className={styles.topControls}>
                     {!instrumentActive && (
