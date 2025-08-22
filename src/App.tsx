@@ -509,20 +509,7 @@ const App: React.FC = () => {
                             high={liveHigh}
                             currentNote={instrumentActive ? null : currentNote}
                             detectedNote={instrumentActive ? (instrumentMode.effectiveMidi ?? instrumentMode.detectedMidiState ?? undefined) : undefined}
-                            onChange={(l, h) => {
-                                if (instrumentActive) {
-                                    // In live mode constrain selection to detection window but still persist user intent
-                                    const detMin = instrumentMode.detectionWindow.min;
-                                    const detMax = instrumentMode.detectionWindow.max;
-                                    const clampedL = Math.min(Math.max(l, detMin), detMax);
-                                    const clampedH = Math.min(Math.max(h, detMin), detMax);
-                                    setLowPitch(clampedL);
-                                    setHighPitch(clampedH);
-                                } else {
-                                    setLowPitch(l);
-                                    setHighPitch(h);
-                                }
-                            }}
+                            onChange={(l, h) => { setLowPitch(l); setHighPitch(h); }}
                         />
                     </div>
                 );
