@@ -170,6 +170,168 @@ const App: React.FC = () => {
     const instrumentMode = useInstrumentMode({ keyCenterRef, getAudioContext: () => audioCtxRef.current });
     const instrumentActive = instrumentMode.active;
 
+    // Live training workflow state (only used when instrumentActive)
+    type AttemptFeedback = 'idle' | 'awaiting' | 'correct' | 'near' | 'wrong';
+    const [liveTarget, setLiveTarget] = useState<number | null>(null);
+    const [liveFeedback, setLiveFeedback] = useState<AttemptFeedback>('idle');
+    const [liveAttemptsOnCurrent, setLiveAttemptsOnCurrent] = useState(0); // attempts (stable note evaluations) on current target
+    const [liveFirstAttemptRecorded, setLiveFirstAttemptRecorded] = useState(false); // first attempt has been evaluated (counts toward metrics)
+    const [liveTotalTargets, setLiveTotalTargets] = useState(0); // number of distinct targets introduced (metrics denominator)
+    const [liveFirstAttemptCorrectCount, setLiveFirstAttemptCorrectCount] = useState(0); // number of targets where first attempt was correct
+    const [liveStreak, setLiveStreak] = useState(0); // streak of first-attempt correct targets
+    const [liveCongrats, setLiveCongrats] = useState(false);
+    const [liveSyllable, setLiveSyllable] = useState<string>('');
+    const evaluationDisableUntilRef = useRef<number>(0); // timestamp until which we ignore detections (during cadence/target playback)
+    const lastEvaluatedMidiRef = useRef<number | null>(null); // to avoid re-evaluating same sustained note
+    const lastDetectedNullAtRef = useRef<number>(performance.now());
+    const NEAR_MISS_DISTANCE = 1; // semitone threshold for Near Miss
+    const PROVISIONAL_NOTE_DELAY_MS = 200; // wait after target note playback begins before enabling detection buffer
+
+    const resetLiveState = useCallback(() => {
+        setLiveTarget(null);
+        setLiveFeedback('idle');
+        setLiveAttemptsOnCurrent(0);
+        setLiveFirstAttemptRecorded(false);
+        setLiveSyllable('');
+        lastEvaluatedMidiRef.current = null;
+    }, []);
+
+    // Choose a target note (same constraints as random note selection) but only one at a time for live mode
+    const chooseLiveTarget = useCallback(() => {
+        const attempts = 60;
+        for (let i = 0; i < attempts; i++) {
+            const n = Math.floor(Math.random() * (highPitch - lowPitch + 1)) + lowPitch;
+            const root = computeRoot(keyCenterRef.current);
+            const rel = (n - root + 1200) % 12;
+            const info = SOLFEGE_MAP[rel as keyof typeof SOLFEGE_MAP];
+            if (!info) continue;
+            if (noteMode === 'diatonic' && !info.diatonic) continue;
+            if (noteMode === 'non' && info.diatonic) continue;
+            return n;
+        }
+        return null;
+    }, [highPitch, lowPitch, noteMode]);
+
+    // Start a new target (schedules cadence + target note playback)
+    const startNewLiveTarget = useCallback((reuseSame = false) => {
+        const doStart = (targetMidi: number) => {
+            setLiveTarget(targetMidi);
+            setLiveFeedback('awaiting');
+            setLiveAttemptsOnCurrent(0);
+            setLiveFirstAttemptRecorded(false);
+            setLiveSyllable('');
+            lastEvaluatedMidiRef.current = null;
+        };
+        const tgt = reuseSame ? liveTarget : chooseLiveTarget();
+        if (tgt == null) return;
+        if (!reuseSame) {
+            // metrics: each BRAND NEW target increases totalTargets
+            setLiveTotalTargets(t => t + 1);
+        }
+        // schedule cadence then note
+        const cadenceSeconds = scheduleCadence();
+        const startTime = performance.now();
+        evaluationDisableUntilRef.current = startTime + cadenceSeconds * 1000 + 1500; // disable until note has sounded and decayed a bit
+        // set target immediately so UI knows what's awaited
+        doStart(tgt);
+        // play target after cadence ends
+        setTimeout(() => {
+            playNote(tgt, 1.4);
+            // after short delay, allow evaluation (but keep guard if user is still hearing note from speakers)
+            evaluationDisableUntilRef.current = performance.now() + PROVISIONAL_NOTE_DELAY_MS + 650; // allow earlier detection but still buffer
+        }, cadenceSeconds * 1000 + 120);
+    }, [chooseLiveTarget, scheduleCadence, playNote, liveTarget]);
+
+    // Handle detection evaluation in live mode
+    useEffect(() => {
+        if (!instrumentActive) return;
+        const stable = instrumentMode.detectedMidiState; // stable note only
+        const now = performance.now();
+        if (stable == null) {
+            if (lastDetectedNullAtRef.current + 350 < now) {
+                lastEvaluatedMidiRef.current = null; // allow same note again after silence
+            }
+            return;
+        }
+        if (now < evaluationDisableUntilRef.current) return; // don't evaluate during playback phase
+        if (!liveTarget) return;
+        if (liveFeedback === 'correct') return; // already resolved, waiting for next cycle
+        if (stable === lastEvaluatedMidiRef.current) return; // ignore sustained duplicates
+        lastEvaluatedMidiRef.current = stable;
+
+        // Evaluate attempt
+        const distance = Math.abs(stable - liveTarget);
+        const root = computeRoot(keyCenterRef.current);
+        const rel = (liveTarget - root + 1200) % 12;
+        const solfInfo = SOLFEGE_MAP[rel as keyof typeof SOLFEGE_MAP];
+        if (!liveFirstAttemptRecorded) {
+            // First attempt at this target
+            setLiveAttemptsOnCurrent(a => a + 1);
+            setLiveFirstAttemptRecorded(true);
+            if (distance === 0) {
+                // First-attempt correct
+                setLiveFeedback('correct');
+                setLiveSyllable(solfInfo ? solfInfo.syllable : '');
+                setLiveFirstAttemptCorrectCount(c => c + 1);
+                setLiveStreak(s => s + 1);
+                // schedule next target or key transition
+                setTimeout(() => {
+                    if (liveStreak + 1 >= 10) {
+                        setLiveCongrats(true);
+                        setTimeout(() => {
+                            setLiveCongrats(false);
+                            // change key
+                            newKeyCenter();
+                            setLiveStreak(0);
+                            startNewLiveTarget(false);
+                        }, 2200);
+                    } else {
+                        startNewLiveTarget(false);
+                    }
+                }, 850);
+            } else {
+                // Not correct on first attempt
+                if (distance <= NEAR_MISS_DISTANCE) {
+                    setLiveFeedback('near');
+                } else {
+                    setLiveFeedback('wrong');
+                }
+                // streak broken
+                if (liveStreak !== 0) setLiveStreak(0);
+            }
+        } else {
+            // Second (or later) attempt on this same target
+            setLiveAttemptsOnCurrent(a => a + 1);
+            if (distance === 0) {
+                setLiveFeedback('correct');
+                setLiveSyllable(solfInfo ? solfInfo.syllable : '');
+                // Do NOT increment streak or metrics (first attempt already counted)
+                setTimeout(() => startNewLiveTarget(false), 900);
+            } else {
+                // Another wrong; if this is second attempt since last feedback change (i.e., attemptsOnCurrent >=2 and current attempt still wrong), replay cadence & same note
+                if (liveAttemptsOnCurrent + 1 >= 2) {
+                    // repeat cadence and same target; do not create new metrics entry
+                    startNewLiveTarget(true);
+                }
+            }
+        }
+    }, [instrumentActive, instrumentMode.detectedMidiState, liveTarget, liveFeedback, liveFirstAttemptRecorded, liveAttemptsOnCurrent, liveStreak, startNewLiveTarget, keyCenterRef]);
+
+    // When entering live mode, initialize workflow
+    useEffect(() => {
+        if (instrumentActive) {
+            // stop autoplay playback if running
+            if (isPlaying) stopPlayback(true);
+            resetLiveState();
+            startNewLiveTarget(false);
+        } else {
+            // leaving live mode
+            resetLiveState();
+        }
+    }, [instrumentActive]);
+
+    const liveAccuracy = liveTotalTargets > 0 ? (liveFirstAttemptCorrectCount / liveTotalTargets) : 0;
+
     const newKeyCenter = useCallback(() => {
         const idx = Math.floor(Math.random() * keysCircle.length);
         const key = keysCircle[idx] as string;
@@ -372,6 +534,31 @@ const App: React.FC = () => {
                                                         fr {instrumentMode.sensitivityProfile.frames} / {instrumentMode.sensitivityProfile.stableMs}ms | jit ±{instrumentMode.sensitivityProfile.jitterSpan}
                                                     </div>
                                                 </div>
+                                                <div style={{ flexBasis:'100%', height:0 }} />
+                                                <div style={{ minWidth:160 }}>
+                                                    <strong>Target</strong><br />
+                                                    <span style={{ fontSize:'.65rem' }}>{liveTarget != null ? midiToName(liveTarget) : '—'}</span>
+                                                </div>
+                                                <div style={{ minWidth:180 }}>
+                                                    <strong>Feedback</strong><br />
+                                                    <span style={{ fontSize:'.65rem', color: liveFeedback==='correct' ? '#10b981' : liveFeedback==='near' ? '#f59e0b' : liveFeedback==='wrong' ? '#ef4444' : '#94a3b8' }}>
+                                                        {liveFeedback === 'awaiting' && 'Play the note'}
+                                                        {liveFeedback === 'correct' && 'Correct'}
+                                                        {liveFeedback === 'near' && 'Near Miss'}
+                                                        {liveFeedback === 'wrong' && 'Wrong'}
+                                                        {liveFeedback === 'idle' && '—'}
+                                                    </span>
+                                                </div>
+                                                <div style={{ minWidth:140 }}>
+                                                    <strong>Syllable</strong><br />
+                                                    <span style={{ fontSize:'.65rem' }}>{liveSyllable || (liveFeedback==='correct' ? '' : '—')}</span>
+                                                </div>
+                                                <div style={{ minWidth:150 }}>
+                                                    <strong>Metrics</strong><br />
+                                                    <span style={{ fontSize:'.55rem' }}>First-attempt: {liveFirstAttemptCorrectCount}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)</span><br />
+                                                    <span style={{ fontSize:'.55rem' }}>Streak: {liveStreak} / 10</span>
+                                                </div>
+                                                {liveCongrats && <div style={{ padding:'.4rem .6rem', background:'#2563eb', color:'#fff', borderRadius:4, fontSize:'.65rem' }}>Congratulations! New key coming…</div>}
                     </div>
                 )}
             </div>
