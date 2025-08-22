@@ -360,6 +360,20 @@ const App: React.FC = () => {
         }
     }, [startSequence, instrumentActive]);
 
+    const newKeyCenterDifferent = useCallback(() => {
+        let key = keyCenterRef.current;
+        if (keysCircle.length > 1) {
+            for (let i=0;i<20;i++) {
+                const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
+                if (cand !== keyCenterRef.current) { key = cand; break; }
+            }
+        }
+        setKeyCenter(key);
+        keyCenterRef.current = key;
+        setCurrentNote(null);
+        setShowSolfege('');
+    }, []);
+
     // No initial note; first Play establishes key via cadence then generates first note.
 
     // Ensure low <= high
@@ -501,6 +515,12 @@ const App: React.FC = () => {
                     <button className="secondary" onClick={() => { instrumentActive ? instrumentMode.stopMode() : instrumentMode.startMode(); }}>
                         {instrumentActive ? 'Exit Live' : 'Live Piano'}
                     </button>
+                    {instrumentActive && (
+                        <>
+                            <button className="secondary" onClick={() => startNewLiveTarget(true, false)} disabled={!liveTarget}>Again</button>
+                            <button className="secondary" onClick={() => { newKeyCenterDifferent(); startNewLiveTarget(false, false); }}>New Key</button>
+                        </>
+                    )}
                     <div className={styles.prominentToggles}>
                         {!instrumentActive && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={autoPlay} onChange={e => { setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay
