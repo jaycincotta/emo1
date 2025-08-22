@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useLayoutEffect, useState } from 'react';
 
-interface FullKeyboardRangeProps { low: number; high: number; currentNote: number | null; onChange: (low:number, high:number)=>void; detectedNote?: number | null; }
+interface FullKeyboardRangeProps { low: number; high: number; currentNote: number | null; onChange: (low:number, high:number)=>void; detectedNote?: number | null; detectionActive?: boolean; }
 
 const A0 = 21; const C8 = 108; const MIDDLE_C = 60; // C4
 const BLACKS = new Set([1,3,6,8,10]);
@@ -29,7 +29,7 @@ const allKeys: KeyObj[] = [...segmentLow, ...segmentHigh];
 const DETECT_MIN = 28;
 const DETECT_MAX = 98;
 
-const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, currentNote, onChange, detectedNote }) => {
+const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, currentNote, onChange, detectedNote, detectionActive=false }) => {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const [whiteW, setWhiteW] = useState(42);
   const [wrapped, setWrapped] = useState(false);
@@ -101,13 +101,13 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
       <div className="full-piano" style={{ width: rowWidth, ['--white-w' as any]: whiteW+'px', height: whiteH }}>
         {whites.map(k => {
           const inRange = k.midi>=low && k.midi<=high;
-          const inDetectWindow = k.midi>=DETECT_MIN && k.midi<=DETECT_MAX;
+          const inDetectWindow = !detectionActive || (k.midi>=DETECT_MIN && k.midi<=DETECT_MAX);
           // edge highlighting removed per user request
       const active = currentNote===k.midi;
       const detected = detectedNote===k.midi;
           return (
             <div key={k.midi}
-  className={'kp white'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow?' out-detect':'')}
+  className={'kp white'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow && detectionActive?' out-detect':'')}
               onClick={()=>handleSelectWhite(k.midi)}
               data-midi={k.midi}
               aria-label={midiToName(k.midi)} />
@@ -118,12 +118,12 @@ const FullKeyboardRange: React.FC<FullKeyboardRangeProps> = ({ low, high, curren
           const offset = global && k.midi >= MIDDLE_C ? totalWhiteLow : 0;
           const left = (offset + prevWhiteIndex + 0.72) * whiteW;
           const inRange = k.midi>=low && k.midi<=high;
-          const inDetectWindow = k.midi>=DETECT_MIN && k.midi<=DETECT_MAX;
+          const inDetectWindow = !detectionActive || (k.midi>=DETECT_MIN && k.midi<=DETECT_MAX);
       const active = currentNote===k.midi;
       const detected = detectedNote===k.midi;
           return (
             <div key={k.midi}
-        className={'kp black'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow?' out-detect':'')}
+  className={'kp black'+(inRange?' in-range':'')+(active?' active':'')+(detected?' detected':'')+(!inDetectWindow && detectionActive?' out-detect':'')}
               style={{ left, height: blackH }}
               data-midi={k.midi}
               aria-label={midiToName(k.midi)} />

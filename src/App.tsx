@@ -505,10 +505,11 @@ const App: React.FC = () => {
                 return (
                     <div className={liveFeedback==='near' ? 'quality-near' : liveFeedback==='wrong' ? 'quality-wrong' : liveFeedback==='correct' ? 'quality-correct' : ''}>
                         <FullKeyboardRange
-                            low={liveLow}
-                            high={liveHigh}
+                            low={instrumentActive ? liveLow : lowPitch}
+                            high={instrumentActive ? liveHigh : highPitch}
                             currentNote={instrumentActive ? null : currentNote}
                             detectedNote={instrumentActive ? (instrumentMode.effectiveMidi ?? instrumentMode.detectedMidiState ?? undefined) : undefined}
+                            detectionActive={instrumentActive}
                             onChange={(l, h) => { setLowPitch(l); setHighPitch(h); }}
                         />
                     </div>
