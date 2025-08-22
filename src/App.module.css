@@ -43,6 +43,11 @@
 /* Global piano key styling hooks (keyboard renders plain class names) */
 :global(.kp.white.detected:not(.active)) { background:#1fb655; box-shadow:0 0 0 1px #178d44 inset, 0 0 10px 2px rgba(31,182,85,.55); position:relative; }
 :global(.kp.black.detected:not(.active)) { background:#1fb655; box-shadow:0 0 6px 2px rgba(31,182,85,.6); }
+/* Variant coloring via data-detect-quality attribute on wrapper */
+:global(.quality-near .kp.white.detected:not(.active)) { background:#f59e0b; box-shadow:0 0 0 1px #d97706 inset,0 0 10px 2px rgba(245,158,11,.55); }
+:global(.quality-near .kp.black.detected:not(.active)) { background:#f59e0b; box-shadow:0 0 6px 2px rgba(245,158,11,.55); }
+:global(.quality-wrong .kp.white.detected:not(.active)) { background:#dc2626; box-shadow:0 0 0 1px #b91c1c inset,0 0 10px 2px rgba(220,38,38,.55); }
+:global(.quality-wrong .kp.black.detected:not(.active)) { background:#dc2626; box-shadow:0 0 6px 2px rgba(220,38,38,.55); }
 :global(.kp.white.out-detect) { opacity:.25; filter:grayscale(1) brightness(.85); }
 :global(.kp.black.out-detect) { opacity:.18; filter:grayscale(1) brightness(.9); }
 :global(.kp.white.out-detect.detected), :global(.kp.black.out-detect.detected) { opacity:.6; filter:none; }

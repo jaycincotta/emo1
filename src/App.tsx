@@ -337,12 +337,13 @@ const App: React.FC = () => {
         const key = keysCircle[idx] as string;
         setKeyCenter(key);
         keyCenterRef.current = key;
-        // Clear current note/solfege so old syllable not shown under new key
         setCurrentNote(null);
         setShowSolfege('');
-        // Start immediately using override so cadence reflects the new key even before re-render
-        startSequence(true, key);
-    }, [startSequence]);
+        // In live (instrument) mode we do NOT invoke autoplay sequence (prevents stray cadences/notes)
+        if (!instrumentActive) {
+            startSequence(true, key);
+        }
+    }, [startSequence, instrumentActive]);
 
     // No initial note; first Play establishes key via cadence then generates first note.
 
@@ -435,14 +436,38 @@ const App: React.FC = () => {
                 <div className={`muted ${styles.muted}`}>{currentNote != null ? midiToName(currentNote) : ''}</div>
             </div>
 
+            {/* Live mode prominent feedback banner */}
+            {instrumentActive && (
+                <div style={{margin:'0.5rem 0 0.75rem',padding:'0.75rem 0.9rem',borderRadius:8,background: liveFeedback==='correct' ? '#064e3b' : liveFeedback==='near' ? '#78350f' : liveFeedback==='wrong' ? '#7f1d1d' : '#1e293b', color:'#fff', display:'flex',flexWrap:'wrap',alignItems:'center',gap:'1rem'}}>
+                    <div style={{fontSize:'1.15rem',fontWeight:600,minWidth:120}}>
+                        {liveFeedback==='awaiting' && 'Sing the note'}
+                        {liveFeedback==='correct' && 'Correct'}
+                        {liveFeedback==='near' && 'Near Miss'}
+                        {liveFeedback==='wrong' && 'Try Again'}
+                        {liveFeedback==='idle' && '…'}
+                    </div>
+                    <div style={{fontSize:'.85rem',opacity:.9,minWidth:90}}>Target: <strong>{liveFeedback==='correct' && liveTarget!=null ? midiToName(liveTarget) : '—'}</strong></div>
+                    <div style={{fontSize:'.85rem',opacity:.9,minWidth:90}}>Syllable: <strong>{liveSyllable || (liveFeedback==='correct' ? '' : '—')}</strong></div>
+                    {/* Streak progress (10 first-attempt correct to key change) */}
+                    <div style={{display:'flex',alignItems:'center',gap:6}} aria-label="Streak progress">
+                        {[...Array(10)].map((_,i)=> <div key={i} style={{width:18,height:18,borderRadius:4,background: i<liveStreak ? '#10b981' : '#334155',border:'1px solid #475569',boxShadow: i<liveStreak ? '0 0 4px 1px rgba(16,185,129,.6)' : 'none',transition:'background .25s'}} />)}
+                        <div style={{fontSize:'.65rem',marginLeft:4}}>Streak {liveStreak}/10</div>
+                    </div>
+                    <div style={{fontSize:'.65rem',opacity:.8}}>First-attempt: {(liveFirstAttemptCorrectCount)}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)</div>
+                    {liveCongrats && <div style={{fontSize:'.75rem',background:'#2563eb',padding:'.35rem .55rem',borderRadius:4}}>Key change incoming…</div>}
+                </div>
+            )}
+
             {/* Full keyboard (range selectable) below solfege */}
-                        <FullKeyboardRange
-                            low={instrumentActive ? instrumentMode.detectionWindow.min : lowPitch}
-                            high={instrumentActive ? instrumentMode.detectionWindow.max : highPitch}
-                            currentNote={instrumentActive ? null : currentNote}
-                            detectedNote={instrumentActive ? (instrumentMode.effectiveMidi ?? instrumentMode.detectedMidiState ?? undefined) : undefined}
-                            onChange={(l, h) => { if (!instrumentActive) { setLowPitch(l); setHighPitch(h); } }}
-                        />
+            <div className={liveFeedback==='near' ? 'quality-near' : liveFeedback==='wrong' ? 'quality-wrong' : liveFeedback==='correct' ? 'quality-correct' : ''}>
+                <FullKeyboardRange
+                    low={instrumentActive ? instrumentMode.detectionWindow.min : lowPitch}
+                    high={instrumentActive ? instrumentMode.detectionWindow.max : highPitch}
+                    currentNote={instrumentActive ? null : currentNote}
+                    detectedNote={instrumentActive ? (instrumentMode.effectiveMidi ?? instrumentMode.detectedMidiState ?? undefined) : undefined}
+                    onChange={(l, h) => { if (!instrumentActive) { setLowPitch(l); setHighPitch(h); } }}
+                />
+            </div>
             <div className={`card ${styles.controlsCard}`}>
                 <div className={styles.topControls}>
                     {!instrumentActive && (
@@ -502,7 +527,7 @@ const App: React.FC = () => {
                     </div>
                 )}
                 {instrumentActive && (
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode">
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode technical panel">
                         <div style={{ minWidth:110 }}>
                             <strong>Level</strong><br />
                             <div style={{ background:'#243140', width:100, height:8, borderRadius:4, overflow:'hidden', position:'relative' }}>
@@ -535,30 +560,11 @@ const App: React.FC = () => {
                                                     </div>
                                                 </div>
                                                 <div style={{ flexBasis:'100%', height:0 }} />
-                                                <div style={{ minWidth:160 }}>
-                                                    <strong>Target</strong><br />
-                                                    <span style={{ fontSize:'.65rem' }}>{liveTarget != null ? midiToName(liveTarget) : '—'}</span>
-                                                </div>
-                                                <div style={{ minWidth:180 }}>
-                                                    <strong>Feedback</strong><br />
-                                                    <span style={{ fontSize:'.65rem', color: liveFeedback==='correct' ? '#10b981' : liveFeedback==='near' ? '#f59e0b' : liveFeedback==='wrong' ? '#ef4444' : '#94a3b8' }}>
-                                                        {liveFeedback === 'awaiting' && 'Play the note'}
-                                                        {liveFeedback === 'correct' && 'Correct'}
-                                                        {liveFeedback === 'near' && 'Near Miss'}
-                                                        {liveFeedback === 'wrong' && 'Wrong'}
-                                                        {liveFeedback === 'idle' && '—'}
-                                                    </span>
-                                                </div>
-                                                <div style={{ minWidth:140 }}>
-                                                    <strong>Syllable</strong><br />
-                                                    <span style={{ fontSize:'.65rem' }}>{liveSyllable || (liveFeedback==='correct' ? '' : '—')}</span>
-                                                </div>
+                                                {/* Target / feedback moved to banner; keep minimal tech stats here */}
                                                 <div style={{ minWidth:150 }}>
-                                                    <strong>Metrics</strong><br />
-                                                    <span style={{ fontSize:'.55rem' }}>First-attempt: {liveFirstAttemptCorrectCount}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)</span><br />
-                                                    <span style={{ fontSize:'.55rem' }}>Streak: {liveStreak} / 10</span>
+                                                    <strong>First-attempt</strong><br />
+                                                    <span style={{ fontSize:'.55rem' }}>{liveFirstAttemptCorrectCount}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)</span>
                                                 </div>
-                                                {liveCongrats && <div style={{ padding:'.4rem .6rem', background:'#2563eb', color:'#fff', borderRadius:4, fontSize:'.65rem' }}>Congratulations! New key coming…</div>}
                     </div>
                 )}
             </div>
