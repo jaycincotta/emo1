@@ -198,9 +198,15 @@ const App: React.FC = () => {
 
     // Choose a target note (same constraints as random note selection) but only one at a time for live mode
     const chooseLiveTarget = useCallback(() => {
-        const attempts = 60;
+        // Intersect user-selected range with detection window so pitchy can actually recognize the target
+        const detMin = instrumentMode.detectionWindow.min;
+        const detMax = instrumentMode.detectionWindow.max;
+        const effLow = Math.max(lowPitch, detMin);
+        const effHigh = Math.min(highPitch, detMax);
+        if (effLow > effHigh) return null; // no overlap
+        const attempts = 80;
         for (let i = 0; i < attempts; i++) {
-            const n = Math.floor(Math.random() * (highPitch - lowPitch + 1)) + lowPitch;
+            const n = Math.floor(Math.random() * (effHigh - effLow + 1)) + effLow;
             const root = computeRoot(keyCenterRef.current);
             const rel = (n - root + 1200) % 12;
             const info = SOLFEGE_MAP[rel as keyof typeof SOLFEGE_MAP];
@@ -210,7 +216,7 @@ const App: React.FC = () => {
             return n;
         }
         return null;
-    }, [highPitch, lowPitch, noteMode]);
+    }, [highPitch, lowPitch, noteMode, instrumentMode.detectionWindow.min, instrumentMode.detectionWindow.max]);
 
     // Start a new target (schedules cadence + target note playback)
     const startNewLiveTarget = useCallback((reuseSame = false) => {
@@ -440,7 +446,7 @@ const App: React.FC = () => {
             {instrumentActive && (
                 <div style={{margin:'0.5rem 0 0.75rem',padding:'0.75rem 0.9rem',borderRadius:8,background: liveFeedback==='correct' ? '#064e3b' : liveFeedback==='near' ? '#78350f' : liveFeedback==='wrong' ? '#7f1d1d' : '#1e293b', color:'#fff', display:'flex',flexWrap:'wrap',alignItems:'center',gap:'1rem'}}>
                     <div style={{fontSize:'1.15rem',fontWeight:600,minWidth:120}}>
-                        {liveFeedback==='awaiting' && 'Sing the note'}
+                        {liveFeedback==='awaiting' && 'Play the note'}
                         {liveFeedback==='correct' && 'Correct'}
                         {liveFeedback==='near' && 'Near Miss'}
                         {liveFeedback==='wrong' && 'Try Again'}
