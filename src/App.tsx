@@ -459,39 +459,44 @@ const App: React.FC = () => {
                 onReset={hardResetWrapper}
             />
             <h1 className={styles.appHeader}>Solfege Ear Trainer</h1>
-            <div className={`card ${styles.cardColumn}`}>
+            <div className={`card ${styles.cardColumn}`}
+                 style={instrumentActive ? {background: liveFeedback==='correct' ? '#053424' : liveFeedback==='near' ? '#442a07' : liveFeedback==='wrong' ? '#401414' : '#1b1f27', transition:'background .25s'} : undefined}>
                 <div className="key-name">Key Center: <strong>{keyDisplay}</strong></div>
-                <div className="solfege">{showSolfege || '—'}</div>
-                <div className={`muted ${styles.muted}`}>{currentNote != null ? midiToName(currentNote) : ''}</div>
-            </div>
-
-            {/* Live mode prominent feedback banner */}
-            {instrumentActive && (
-                <div style={{margin:'0.5rem 0 0.75rem',padding:'0.75rem 0.9rem',borderRadius:8,background: liveFeedback==='correct' ? '#064e3b' : liveFeedback==='near' ? '#78350f' : liveFeedback==='wrong' ? '#7f1d1d' : '#1e293b', color:'#fff', display:'flex',flexWrap:'wrap',alignItems:'center',gap:'1rem'}}>
-                    <div style={{fontSize:'1.15rem',fontWeight:600,minWidth:120}}>
-                        {liveFeedback==='awaiting' && 'Play the note'}
-                        {liveFeedback==='correct' && 'Correct'}
-                        {liveFeedback==='near' && 'Wrong Octave'}
-                        {liveFeedback==='wrong' && 'Try Again'}
-                        {liveFeedback==='idle' && '…'}
-                    </div>
-                    <div style={{fontSize:'.85rem',opacity:.9,minWidth:90}}>Target: <strong>{liveFeedback==='correct' && liveTarget!=null ? midiToName(liveTarget) : '—'}</strong></div>
-                    <div style={{fontSize:'.85rem',opacity:.9,minWidth:90}}>Syllable: <strong>{liveSyllable || (liveFeedback==='correct' ? '' : '—')}</strong></div>
-                    {/* Streak progress (10 first-attempt correct to key change) */}
-                    <div style={{display:'flex',alignItems:'center',gap:6}} aria-label="Streak progress">
-                        {[...Array(10)].map((_,i)=> <div key={i} style={{width:18,height:18,borderRadius:4,background: i<liveStreak ? '#10b981' : '#334155',border:'1px solid #475569',boxShadow: i<liveStreak ? '0 0 4px 1px rgba(16,185,129,.6)' : 'none',transition:'background .25s'}} />)}
-                        <div style={{fontSize:'.65rem',marginLeft:4}}>Streak {liveStreak}/10</div>
-                    </div>
-                    <div style={{fontSize:'.65rem',opacity:.8}}>First-attempt: {(liveFirstAttemptCorrectCount)}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)</div>
-                    <label className={styles.prominentCheck} style={{fontSize:'.65rem',padding:'.3rem .6rem'}}>
-                        <input type="checkbox" checked={liveStrict} onChange={e=>setLiveStrict(e.target.checked)} />Strict
-                    </label>
-                    <label className={styles.prominentCheck} style={{fontSize:'.65rem',padding:'.3rem .6rem'}}>
-                        <input type="checkbox" checked={liveRepeatCadence} onChange={e=>setLiveRepeatCadence(e.target.checked)} />Repeat cadence
-                    </label>
-                    {liveCongrats && <div style={{fontSize:'.75rem',background:'#2563eb',padding:'.35rem .55rem',borderRadius:4}}>Key change incoming…</div>}
+                <div className="solfege">
+                    {instrumentActive ? (
+                        liveFeedback==='correct' ? (
+                            <span style={{display:'inline-flex',alignItems:'baseline',gap:'1.1rem'}}>
+                                <span style={{lineHeight:1}}>{liveSyllable || '—'}</span>
+                                {liveTarget!=null && <span style={{fontSize:'1.45rem',lineHeight:1,opacity:.92}}>{midiToName(liveTarget)}</span>}
+                            </span>
+                        ) : '—'
+                    ) : (showSolfege || '—')}
                 </div>
-            )}
+                <div className={`muted ${styles.muted}`}>
+                    {!instrumentActive && currentNote != null ? midiToName(currentNote) : ''}
+                </div>
+                {instrumentActive && (
+                    <div style={{marginTop:'.55rem', display:'flex', flexWrap:'wrap', alignItems:'center', gap:'0.85rem'}}>
+                        <div style={{fontSize:'.85rem', fontWeight:600, minWidth:90}}>
+                            {liveFeedback==='awaiting' && 'Play the note'}
+                            {liveFeedback==='correct' && 'Correct'}
+                            {liveFeedback==='near' && 'Wrong Octave'}
+                            {liveFeedback==='wrong' && 'Try Again'}
+                            {liveFeedback==='idle' && '…'}
+                        </div>
+                        <div style={{display:'flex', alignItems:'center', gap:6}} aria-label="Streak progress">
+                            {[...Array(10)].map((_,i)=> <div key={i} style={{width:18,height:18,borderRadius:4,background: i<liveStreak ? '#10b981' : '#334155',border:'1px solid #475569',boxShadow: i<liveStreak ? '0 0 5px 1px rgba(16,185,129,.6)' : 'none',transition:'background .25s'}} />)}
+                            <div style={{fontSize:'.75rem', fontWeight:600, marginLeft:4}}>Streak {liveStreak}/10</div>
+                        </div>
+                        <div style={{fontSize:'.75rem', fontWeight:600}}>
+                            First-attempt: {liveFirstAttemptCorrectCount}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)
+                        </div>
+                        {liveCongrats && (
+                            <div style={{fontSize:'.65rem', background:'#2563eb', padding:'.3rem .55rem', borderRadius:6}}>Key change incoming…</div>
+                        )}
+                    </div>
+                )}
+            </div>
 
             {/* Full keyboard (range selectable) below solfege */}
             {(() => {
@@ -524,13 +529,20 @@ const App: React.FC = () => {
                     )}
                     {!instrumentActive && <button className="secondary" onClick={() => triggerCadence()} disabled={currentNote == null}>Again</button>}
                     {!instrumentActive && <button className="secondary" onClick={() => newKeyCenter()}>New Key</button>}
-                    <button className="secondary" onClick={() => { instrumentActive ? instrumentMode.stopMode() : instrumentMode.startMode(); }}>
-                        {instrumentActive ? 'Exit Live' : 'Live Piano'}
-                    </button>
+                    {!instrumentActive && (
+                        <button className="secondary" onClick={() => instrumentMode.startMode()}>Live Piano</button>
+                    )}
                     {instrumentActive && (
                         <>
+                            <button className="secondary" onClick={() => instrumentMode.stopMode()}>Exit Live</button>
                             <button className="secondary" onClick={() => startNewLiveTarget(true, false)} disabled={!liveTarget}>Again</button>
                             <button className="secondary" onClick={() => { newKeyCenterDifferent(); startNewLiveTarget(false, false); }}>New Key</button>
+                            <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
+                                <input type="checkbox" checked={liveStrict} onChange={e=>setLiveStrict(e.target.checked)} />Strict
+                            </label>
+                            <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
+                                <input type="checkbox" checked={liveRepeatCadence} onChange={e=>setLiveRepeatCadence(e.target.checked)} />Repeat cadence
+                            </label>
                         </>
                     )}
                     <div className={styles.prominentToggles}>
@@ -540,18 +552,8 @@ const App: React.FC = () => {
                         {!instrumentActive && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence
                         </label>}
-                                                {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>}
-                                                {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
-                                                {instrumentActive && (
-                                                    <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
-                                                        <input type="checkbox" checked={liveStrict} onChange={e=>setLiveStrict(e.target.checked)} />Strict
-                                                    </label>
-                                                )}
-                                                {instrumentActive && (
-                                                    <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
-                                                        <input type="checkbox" checked={liveRepeatCadence} onChange={e=>setLiveRepeatCadence(e.target.checked)} />Repeat cadence
-                                                    </label>
-                                                )}
+                        {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>}
+                        {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
                         {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.55rem', background:'#a00', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic Err</div>}
                     </div>
                 </div>
@@ -590,7 +592,7 @@ const App: React.FC = () => {
                     </div>
                 )}
                 {instrumentActive && (
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode technical panel">
+                    <div style={{ marginTop:'.6rem', display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode technical panel">
                         <div style={{ minWidth:110 }}>
                             <strong>Level</strong><br />
                             <div style={{ background:'#243140', width:100, height:8, borderRadius:4, overflow:'hidden', position:'relative' }}>
@@ -623,11 +625,7 @@ const App: React.FC = () => {
                                                     </div>
                                                 </div>
                                                 <div style={{ flexBasis:'100%', height:0 }} />
-                                                {/* Target / feedback moved to banner; keep minimal tech stats here */}
-                                                <div style={{ minWidth:150 }}>
-                                                    <strong>First-attempt</strong><br />
-                                                    <span style={{ fontSize:'.55rem' }}>{liveFirstAttemptCorrectCount}/{liveTotalTargets} ({(liveAccuracy*100).toFixed(0)}%)</span>
-                                                </div>
+                                                {/* Metrics moved to top card; technical stats only here */}
                     </div>
                 )}
             </div>
