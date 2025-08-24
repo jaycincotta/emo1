@@ -709,6 +709,7 @@ const App: React.FC = () => {
                                 <div><strong>Goal</strong>: Sing or play the hidden target note. It reveals only when you match pitch exactly (green).</div>
                                 <div><strong>Feedback colors</strong>: Green = exact pitch; Orange = correct scale degree different octave (Wrong Octave); Red = wrong degree.</div>
                                 <div><strong>Streak</strong>: Counts consecutive targets you nail on the first attempt. 10 first-attempt wins triggers an automatic key change.</div>
+                                <div><strong>Rand Key</strong>: Slider sets % chance (0–100) of an automatic different key after a first-attempt success (Wrong Octave also counts if Strict is off). Streak is preserved. A cadence always plays so you can re-orient.</div>
                                 <div><strong>First-attempt %</strong>: How often your very first stable pitch on a target was correct.</div>
                                 <div><strong>Strict</strong>: When ON, a Wrong Octave (orange) resets streak. When OFF, orange is forgiven (streak continues).</div>
                                 <div><strong>Repeat cadence</strong>: ON = cadence each target. OFF = cadence only for the first (then just target tones).</div>
@@ -726,6 +727,7 @@ const App: React.FC = () => {
                                 <div><strong>Play</strong>: Cadence (if first time or after New Key) then a random note within your range & note set.</div>
                                 <div><strong>Autoplay</strong>: Continuous stream of random drill notes. Turn off for single-shot manual practice (use Play each time).</div>
                                 <div><strong>Repeat cadence</strong>: Reinforces tonic each autoplay cycle. Disable for bare tones after the first cadence.</div>
+                                <div><strong>Rand Key</strong>: After each drill note (manual or autoplay) there's a % chance of an automatic different key. A cadence always plays on change so you can orient before the next note.</div>
                                 <div><strong>Again</strong>: Replays cadence and (if autoplay off) the most recent note so you can re-listen.</div>
                                 <div><strong>New Key</strong>: Picks a different key center and immediately cadences before resuming drills.</div>
                                 <div><strong>Range</strong>: Tap new low/high endpoints directly on the keyboard (full A0–C8 always selectable here).</div>
