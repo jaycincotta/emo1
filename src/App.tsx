@@ -123,10 +123,29 @@ const App: React.FC = () => {
         setDebugInfo(`playNote -> ctx=${ctx?.state}`);
     }, [safePlay, audioUnlocked]);
 
+    // Sequencing guards to ensure only one test (cadence+note) runs at a time
+    const cadenceActiveRef = useRef(false);
+    const noteActiveRef = useRef(false);
+    const pendingRandomKeyRef = useRef(false);
+    const autoplayResumeRef = useRef(false);
+    // Manual mode: track a single user-triggered test window for random key chance
+    const manualUserActionRef = useRef(false);
+
+    // Refs for values defined later (avoid forward dependency issues in updateRandomNote)
+    const isPlayingRef = useRef(false);
+    const stopPlaybackRef = useRef<(() => void) | null>(null);
+    const newKeyCenterFnRef = useRef<(() => void) | null>(null);
+    const randomKeyChangeFnRef = useRef<((resumeAuto:boolean)=>void) | null>(null);
+
     const scheduleCadence = useCallback((keyOverride?: string): number => {
         const key = keyOverride ?? keyCenterRef.current;
         const result = audioServiceRef.current?.scheduleCadence(key, cadenceSpeed);
-        return result?.lengthSec || 0;
+        const len = result?.lengthSec || 0;
+        if (len > 0) {
+            cadenceActiveRef.current = true;
+            setTimeout(() => { cadenceActiveRef.current = false; }, len * 1000 + 50);
+        }
+        return len;
     }, [cadenceSpeed]);
 
     const chooseRandomNote = useCallback(() => {
@@ -147,6 +166,8 @@ const App: React.FC = () => {
     // We'll capture instrumentActive via ref updated in effect to avoid dependency ordering issues
     const instrumentActiveRef = useRef(false);
     const updateRandomNote = useCallback((options?: { play?: boolean; keyOverride?: string; fromRandomKey?: boolean; initial?: boolean }) => {
+        // Prevent overlapping tests: if cadence or note active, ignore this trigger
+        if (cadenceActiveRef.current || noteActiveRef.current) return;
         const note = chooseRandomNote();
         if (note == null) return;
         setCurrentNote(note);
@@ -154,34 +175,39 @@ const App: React.FC = () => {
         const rel = (note - root + 1200) % 12;
         setShowSolfege(SOLFEGE_MAP[rel].syllable);
         if (options?.play) {
-            // Short micro-delay to avoid overlapping scheduling with cadence chords start
-            setTimeout(() => playNote(note, 1.4), 10);
-        }
-        // Random key probability (normal mode only). Applies both autoplay and manual single plays.
-        if (!instrumentActiveRef.current && randomKeyChance > 0 && !options?.fromRandomKey) {
-            const rolled = Math.random() * 100 < randomKeyChance;
-            if (rolled) {
-                // choose different key
-                let newKey = keyCenterRef.current;
-                if (keysCircle.length > 1) {
-                    for (let i=0;i<30;i++) {
-                        const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
-                        if (cand !== keyCenterRef.current) { newKey = cand; break; }
-                    }
-                }
-                setKeyCenter(newKey);
-                keyCenterRef.current = newKey;
-                setCurrentNote(null);
-                setShowSolfege('');
-                const cadenceMs = scheduleCadence(newKey) * 1000 + 140; // always cadence so user orients
+            setTimeout(() => {
+                playNote(note, 1.4);
+                noteActiveRef.current = true;
                 setTimeout(() => {
-                    updateRandomNote({ play: true, keyOverride: newKey, fromRandomKey: true });
-                }, cadenceMs);
+                    noteActiveRef.current = false;
+                    if (pendingRandomKeyRef.current) {
+                        pendingRandomKeyRef.current = false;
+                        const resumeAuto = autoplayResumeRef.current; autoplayResumeRef.current = false;
+                        randomKeyChangeFnRef.current?.(resumeAuto);
+                    } else if (isPlayingRef.current) {
+                        onNoteComplete();
+                    }
+                }, 1550);
+            }, 10);
+        }
+        // Random key chance logic:
+        // Autoplay: evaluate each test.
+        // Manual: evaluate only once per user-triggered test (manualUserActionRef gate) to avoid chaining into pseudo-autoplay.
+        if (!instrumentActiveRef.current && randomKeyChance > 0 && !options?.fromRandomKey && !pendingRandomKeyRef.current) {
+            const allow = isPlayingRef.current || manualUserActionRef.current;
+            if (allow) {
+                const rolled = Math.random() * 100 < randomKeyChance;
+                if (rolled) {
+                    if (isPlayingRef.current) { autoplayResumeRef.current = true; stopPlaybackRef.current?.(); }
+                    pendingRandomKeyRef.current = true;
+                }
+                // Consume manual chance window after single evaluation (rolled or not) when not in autoplay
+                if (!isPlayingRef.current) manualUserActionRef.current = false;
             }
         }
-    }, [chooseRandomNote, playNote, randomKeyChance, scheduleCadence]);
+    }, [chooseRandomNote, playNote, randomKeyChance]);
 
-    const { isPlaying, startSequence, stopPlayback, triggerCadence } = useAutoplayCycle({
+    const { isPlaying, startSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange } = useAutoplayCycle({
         autoPlay: !instrumentLoaded ? autoPlay : (autoPlay && true),
         repeatCadence,
         autoPlaySpeed,
@@ -191,6 +217,9 @@ const App: React.FC = () => {
         playNote,
         instrumentLoaded,
     });
+
+    // Keep refs in sync for guarded callbacks
+    useEffect(() => { isPlayingRef.current = isPlaying; stopPlaybackRef.current = stopPlayback; }, [isPlaying, stopPlayback]);
 
     // Instrument (Live Piano) mode hook integration
     const instrumentMode = useInstrumentMode({ keyCenterRef, getAudioContext: () => audioCtxRef.current });
@@ -395,9 +424,43 @@ const App: React.FC = () => {
         setCurrentNote(null);
         setShowSolfege('');
         if (!instrumentActive) {
+            // Always initiate a test (cadence + note) on New Key button regardless of autoplay state
+            manualUserActionRef.current = true; // start new manual window
+            markKeyChange(key); // ensure cadence even if repeatCadence off
             startSequence(true, key);
         }
     }, [instrumentActive, startSequence]);
+
+    useEffect(() => { newKeyCenterFnRef.current = newKeyCenter; }, [newKeyCenter]);
+
+    // Random key change invoked after a note completes (chance roll). In manual mode: change key only. In autoplay: restart sequence with cadence + note.
+    const randomKeyChange = useCallback((resumeAuto:boolean) => {
+        let key = keyCenterRef.current;
+        if (keysCircle.length > 1) {
+            for (let i=0;i<30;i++) {
+                const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
+                if (cand !== keyCenterRef.current) { key = cand; break; }
+            }
+        }
+        setKeyCenter(key);
+        keyCenterRef.current = key;
+        setCurrentNote(null);
+        setShowSolfege('');
+        if (!instrumentActive) {
+            if (resumeAuto || isPlayingRef.current) {
+                // Autoplay context: immediately start new test
+                markKeyChange(key, true); // immediate restart with cadence
+                startSequence(true, key);
+            } else {
+                // Manual: do NOT auto-start; user must press Play
+                manualUserActionRef.current = false; // consume manual window
+                // Mark pending so next manual Play will cadence first
+                markKeyChange(key);
+            }
+        }
+    }, [instrumentActive, startSequence]);
+
+    useEffect(()=> { randomKeyChangeFnRef.current = randomKeyChange; }, [randomKeyChange]);
 
     const newKeyCenterDifferent = useCallback(() => {
         let key = keyCenterRef.current;
@@ -425,18 +488,7 @@ const App: React.FC = () => {
     // When autoplay speed changes, restart autoplay timing if currently playing.
     // cadenceSpeed changes only affect future scheduleCadence calls; restart handled by hook for repeatCadence/autoPlaySpeed
 
-    // If note mode or range changes while not awaiting a cadence, pick a new note immediately (unless there is no note yet)
-    useEffect(() => {
-        if (currentNote != null) {
-            const newNote = chooseRandomNote();
-            if (newNote != null) {
-                setCurrentNote(newNote);
-                const root = computeRoot(keyCenterRef.current);
-                const rel = (newNote - root + 1200) % 12;
-                setShowSolfege(SOLFEGE_MAP[rel].syllable);
-            }
-        }
-    }, [noteMode, lowPitch, highPitch, chooseRandomNote]);
+    // Removed automatic note refresh on setting changes to isolate test triggers to buttons & autoplay timer.
 
     // After confirmation + instrument load, ensure at least one piano note actually sounds (guard against route muted)
     useEffect(() => {
@@ -570,7 +622,7 @@ const App: React.FC = () => {
             <div className={`card ${styles.controlsCard}`}>
                 <div className={styles.topControls}>
                     {!instrumentActive && (
-                        <button onClick={() => { if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { startSequence(); } }} disabled={loadingInstrument}>
+                        <button onClick={() => { if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { manualUserActionRef.current = true; if(!instrumentLoaded){ initInstrument().then(()=> startSequence()); } else { startSequence(); } } }} disabled={loadingInstrument}>
                             {isPlaying ? '■ Stop' : '▶ Play'}
                         </button>
                     )}
@@ -590,7 +642,7 @@ const App: React.FC = () => {
                     )}
                     <div className={styles.prominentToggles}>
                         {!instrumentActive && <label className={styles.prominentCheck}>
-                            <input type="checkbox" checked={autoPlay} onChange={e => { setAutoPlay(e.target.checked); if (!e.target.checked) { stopPlayback(); } else if (!isPlaying) { startSequence(); } }} />Autoplay
+                            <input type="checkbox" checked={autoPlay} onChange={e => { const next = e.target.checked; setAutoPlay(next); if (!next) { stopPlayback(); } /* enabling no longer auto-starts */ }} />Autoplay
                         </label>}
                         {!instrumentActive && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence

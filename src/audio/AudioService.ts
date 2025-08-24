@@ -60,7 +60,8 @@ export class AudioService {
   }
 
   scheduleCadence(key: string, speed: 'slow'|'medium'|'fast'): CadenceResult {
-    if (!this.instrument || !this.ctx) return { lengthSec: 0 };
+    const ctx = this.ensureContext();
+    if (ctx.state === 'suspended') { ctx.resume().catch(()=>{}); }
     const root = computeRoot(key);
     const tempo = TEMPO_VALUES[speed];
     const I = [root, root+4, root+7];
@@ -70,10 +71,27 @@ export class AudioService {
     const chordDuration = 0.9 * tempo;
     const chordGap = 0.1 * tempo;
     const seq = [I, IV, V, I];
-    const baseTime = this.ctx.currentTime + 0.05;
+    const baseTime = ctx.currentTime + 0.05;
+    const useInstrument = !!this.instrument;
     seq.forEach(ch => {
       ch.forEach(n => {
-        try { this.instrument!.play(midiToName(n), baseTime + rel, { duration: chordDuration }); } catch {}
+        if (useInstrument) {
+          try { this.instrument!.play(midiToName(n), baseTime + rel, { duration: chordDuration }); } catch {}
+        } else {
+          // Fallback simple oscillator voice
+            try {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              const freq = 440 * Math.pow(2, (n - 69) / 12);
+              osc.frequency.value = freq;
+              gain.gain.setValueAtTime(0.0005, baseTime + rel);
+              gain.gain.exponentialRampToValueAtTime(0.25, baseTime + rel + 0.03);
+              gain.gain.exponentialRampToValueAtTime(0.0001, baseTime + rel + chordDuration);
+              osc.connect(gain).connect(ctx.destination);
+              osc.start(baseTime + rel);
+              osc.stop(baseTime + rel + chordDuration + 0.05);
+            } catch {}
+        }
       });
       rel += chordDuration + chordGap;
     });
