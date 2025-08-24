@@ -6,7 +6,7 @@ export interface UseAutoplayCycleParams {
   repeatCadence: boolean;
   autoPlaySpeed: 'slow'|'medium'|'fast';
   scheduleCadence: (keyOverride?: string) => number; // returns length seconds
-  updateRandomNote: (opts?: { play?: boolean; keyOverride?: string }) => void;
+  updateRandomNote: (opts?: { play?: boolean; keyOverride?: string; initial?: boolean }) => void; // initial marks first note after cadence/key change
   currentNote: number | null;
   playNote: (midi: number, duration?: number) => void;
   instrumentLoaded: boolean;
@@ -40,7 +40,7 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
     const needCadenceInitial = isFirst || causeNewKeyCenter || (autoplayMode && repeatCadence);
 
     const playInitial = () => {
-      updateRandomNote({ play: true, keyOverride: causeNewKeyCenter ? keyOverride : undefined });
+      updateRandomNote({ play: true, keyOverride: causeNewKeyCenter ? keyOverride : undefined, initial: true });
       if (isFirst) firstPlayRef.current = false;
       if (autoplayMode) {
         const scheduleNext = () => {

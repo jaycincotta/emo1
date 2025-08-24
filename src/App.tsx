@@ -54,6 +54,8 @@ const App: React.FC = () => {
     const [autoPlaySpeed, setAutoPlaySpeed] = useState<'slow' | 'medium' | 'fast'>('medium');
     const [showInstructions, setShowInstructions] = useState(() => { try { return sessionStorage.getItem('etHideInstr') ? false : true; } catch { return true; } });
     const [showHelpModal, setShowHelpModal] = useState(false);
+    // Random key probability slider (0,25,50,75,100). 0 = disabled
+    const [randomKeyChance, setRandomKeyChance] = useState<number>(0);
     // removed unused states: isPlayingExternal, htmlPrimed (debug remnants)
 
     // Initialize audio / instrument lazily (must be called in a user gesture on iOS to succeed)
@@ -142,7 +144,9 @@ const App: React.FC = () => {
         return null;
     }, [highPitch, lowPitch, noteMode]);
 
-    const updateRandomNote = useCallback((options?: { play?: boolean; keyOverride?: string }) => {
+    // We'll capture instrumentActive via ref updated in effect to avoid dependency ordering issues
+    const instrumentActiveRef = useRef(false);
+    const updateRandomNote = useCallback((options?: { play?: boolean; keyOverride?: string; fromRandomKey?: boolean; initial?: boolean }) => {
         const note = chooseRandomNote();
         if (note == null) return;
         setCurrentNote(note);
@@ -153,7 +157,29 @@ const App: React.FC = () => {
             // Short micro-delay to avoid overlapping scheduling with cadence chords start
             setTimeout(() => playNote(note, 1.4), 10);
         }
-    }, [chooseRandomNote, playNote]);
+        // Random key probability (normal mode only). Applies both autoplay and manual single plays.
+        if (!instrumentActiveRef.current && randomKeyChance > 0 && !options?.fromRandomKey) {
+            const rolled = Math.random() * 100 < randomKeyChance;
+            if (rolled) {
+                // choose different key
+                let newKey = keyCenterRef.current;
+                if (keysCircle.length > 1) {
+                    for (let i=0;i<30;i++) {
+                        const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
+                        if (cand !== keyCenterRef.current) { newKey = cand; break; }
+                    }
+                }
+                setKeyCenter(newKey);
+                keyCenterRef.current = newKey;
+                setCurrentNote(null);
+                setShowSolfege('');
+                const cadenceMs = scheduleCadence(newKey) * 1000 + 140; // always cadence so user orients
+                setTimeout(() => {
+                    updateRandomNote({ play: true, keyOverride: newKey, fromRandomKey: true });
+                }, cadenceMs);
+            }
+        }
+    }, [chooseRandomNote, playNote, randomKeyChance, scheduleCadence]);
 
     const { isPlaying, startSequence, stopPlayback, triggerCadence } = useAutoplayCycle({
         autoPlay: !instrumentLoaded ? autoPlay : (autoPlay && true),
@@ -169,6 +195,8 @@ const App: React.FC = () => {
     // Instrument (Live Piano) mode hook integration
     const instrumentMode = useInstrumentMode({ keyCenterRef, getAudioContext: () => audioCtxRef.current });
     const instrumentActive = instrumentMode.active;
+    // keep ref in sync for updateRandomNote callback
+    useEffect(()=> { instrumentActiveRef.current = instrumentActive; }, [instrumentActive]);
 
     // Live training workflow state (only used when instrumentActive)
     type AttemptFeedback = 'idle' | 'awaiting' | 'correct' | 'near' | 'wrong';
@@ -283,29 +311,35 @@ const App: React.FC = () => {
             // First attempt at this target
             setLiveAttemptsOnCurrent(a => a + 1);
             setLiveFirstAttemptRecorded(true);
-            if (distance === 0) {
-                // First-attempt correct
+            const firstAttemptSuccess = distance === 0 || (sameDegreeDifferentOctave && !liveStrict);
+            if (firstAttemptSuccess) {
                 setLiveFeedback('correct');
                 setLiveSyllable(solfInfo ? solfInfo.syllable : '');
-                setLiveFirstAttemptCorrectCount(c => c + 1);
-                setLiveStreak(s => s + 1);
-                // schedule next target or key transition
+                if (distance === 0) {
+                    setLiveFirstAttemptCorrectCount(c => c + 1);
+                    setLiveStreak(s => s + 1);
+                }
                 setTimeout(() => {
-                    if (liveStreak + 1 >= 10) {
+                    const prospectiveStreak = distance===0 ? liveStreak + 1 : liveStreak;
+                    if (prospectiveStreak >= 10) {
                         setLiveCongrats(true);
                         setTimeout(() => {
                             setLiveCongrats(false);
-                            // change key
                             newKeyCenter();
                             setLiveStreak(0);
                             startNewLiveTarget(false, !liveRepeatCadence);
                         }, 2200);
+                        return;
+                    }
+                    // Random key chance roll (preserve streak). Always cadence on key change.
+                    if (randomKeyChance > 0 && Math.random()*100 < randomKeyChance) {
+                        newKeyCenter();
+                        startNewLiveTarget(false, false);
                     } else {
                         startNewLiveTarget(false, !liveRepeatCadence);
                     }
                 }, 850);
             } else {
-                // Not correct on first attempt
                 if (sameDegreeDifferentOctave) {
                     setLiveFeedback('near');
                     if (liveStrict && liveStreak !== 0) setLiveStreak(0);
@@ -348,22 +382,10 @@ const App: React.FC = () => {
     const liveAccuracy = liveTotalTargets > 0 ? (liveFirstAttemptCorrectCount / liveTotalTargets) : 0;
 
     const newKeyCenter = useCallback(() => {
-        const idx = Math.floor(Math.random() * keysCircle.length);
-        const key = keysCircle[idx] as string;
-        setKeyCenter(key);
-        keyCenterRef.current = key;
-        setCurrentNote(null);
-        setShowSolfege('');
-        // In live (instrument) mode we do NOT invoke autoplay sequence (prevents stray cadences/notes)
-        if (!instrumentActive) {
-            startSequence(true, key);
-        }
-    }, [startSequence, instrumentActive]);
-
-    const newKeyCenterDifferent = useCallback(() => {
+        // Always enforce different key per requirement
         let key = keyCenterRef.current;
         if (keysCircle.length > 1) {
-            for (let i=0;i<20;i++) {
+            for (let i=0;i<30;i++) {
                 const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
                 if (cand !== keyCenterRef.current) { key = cand; break; }
             }
@@ -372,6 +394,24 @@ const App: React.FC = () => {
         keyCenterRef.current = key;
         setCurrentNote(null);
         setShowSolfege('');
+        if (!instrumentActive) {
+            startSequence(true, key);
+        }
+    }, [instrumentActive, startSequence]);
+
+    const newKeyCenterDifferent = useCallback(() => {
+        let key = keyCenterRef.current;
+        if (keysCircle.length > 1) {
+            for (let i=0;i<30;i++) {
+                const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
+                if (cand !== keyCenterRef.current) { key = cand; break; }
+            }
+        }
+        setKeyCenter(key);
+        keyCenterRef.current = key;
+        setCurrentNote(null);
+        setShowSolfege('');
+        return key;
     }, []);
 
     // No initial note; first Play establishes key via cadence then generates first note.
@@ -555,9 +595,23 @@ const App: React.FC = () => {
                         {!instrumentActive && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence
                         </label>}
+                        {!instrumentActive && (
+                            <label className={styles.prominentCheck} style={{display:'flex',alignItems:'center',gap:4}}>
+                                <span style={{fontSize:'.55rem'}}>Rand Key</span>
+                                <input type="range" min={0} max={100} step={25} value={randomKeyChance} onChange={e=> setRandomKeyChance(Number(e.target.value))} style={{width:70}} />
+                                <span style={{fontSize:'.55rem', minWidth:24, textAlign:'right'}}>{randomKeyChance===0?'Off': randomKeyChance+'%'}</span>
+                            </label>
+                        )}
                         {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>}
                         {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
                         {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.55rem', background:'#a00', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic Err</div>}
+                        {instrumentActive && (
+                            <label className={styles.prominentCheck} style={{display:'flex',alignItems:'center',gap:4}}>
+                                <span style={{fontSize:'.55rem'}}>Rand Key</span>
+                                <input type="range" min={0} max={100} step={25} value={randomKeyChance} onChange={e=> setRandomKeyChance(Number(e.target.value))} style={{width:70}} />
+                                <span style={{fontSize:'.55rem', minWidth:24, textAlign:'right'}}>{randomKeyChance===0?'Off': randomKeyChance+'%'}</span>
+                            </label>
+                        )}
                     </div>
                 </div>
                 {!instrumentActive && (
