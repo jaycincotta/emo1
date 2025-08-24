@@ -649,15 +649,39 @@ const App: React.FC = () => {
                 <div className={styles.helpModalBackdrop} role="dialog" aria-modal="true" aria-labelledby="helpTitle">
                     <div className={styles.helpModal}>
                         <button aria-label="Close" className={styles.helpClose} onClick={() => setShowHelpModal(false)}>×</button>
-                        <h2 id="helpTitle">Quick Tips</h2>
-                        <div className={styles.helpSections}>
-                            <div><strong>Play</strong>: Plays a cadence (first time or new key) then a random note in range.</div>
-                            <div><strong>Autoplay</strong>: Continuously drills random notes. Turn off for manual single-note practice.</div>
-                            <div><strong>Repeat cadence</strong>: Keeps reinforcing tonic between autoplay notes. Disable to hear bare tones.</div>
-                            <div><strong>Range</strong>: Tap new low/high ends directly on the keyboard.</div>
-                            <div><strong>Note set</strong>: Diatonic (scale tones), Non-diatonic (chromatic neighbors), Chromatic (all 12).</div>
-                            <div><strong>Speeds</strong>: Cadence speed = cadence pacing; Autoplay speed = delay between drills.</div>
-                        </div>
+                        <h2 id="helpTitle">Quick Tips – {instrumentActive ? 'Live Piano' : 'Normal'} Mode</h2>
+                        {instrumentActive ? (
+                            <div className={styles.helpSections} style={{ maxHeight:'52vh', overflowY:'auto', paddingRight:'.4rem' }}>
+                                <div><strong>Goal</strong>: Sing or play the hidden target note. It reveals only when you match pitch exactly (green).</div>
+                                <div><strong>Feedback colors</strong>: Green = exact pitch; Orange = correct scale degree different octave (Wrong Octave); Red = wrong degree.</div>
+                                <div><strong>Streak</strong>: Counts consecutive targets you nail on the first attempt. 10 first-attempt wins triggers an automatic key change.</div>
+                                <div><strong>First-attempt %</strong>: How often your very first stable pitch on a target was correct.</div>
+                                <div><strong>Strict</strong>: When ON, a Wrong Octave (orange) resets streak. When OFF, orange is forgiven (streak continues).</div>
+                                <div><strong>Repeat cadence</strong>: ON = cadence each target. OFF = cadence only for the first (then just target tones).</div>
+                                <div><strong>Again</strong>: Replays cadence (if enabled) and the SAME hidden target so you can re-attempt.</div>
+                                <div><strong>New Key</strong>: Changes key center and generates a fresh target immediately.</div>
+                                <div><strong>Wrong twice?</strong>: After two evaluated wrong attempts the same target is replayed (with cadence if enabled) to refocus your ear.</div>
+                                <div><strong>Range vs detection window</strong>: Greyed keys lie outside the mic detection window (approx 28–98). Your broader practice range is preserved for normal mode.</div>
+                                <div><strong>Sensitivity</strong>: Auto adapts to room sound. Manual levels trade rejection (Low) vs responsiveness (High).</div>
+                                <div><strong>Profile stats</strong>: Clarity / RMS / stability frames help diagnose noise. Higher clarity & lower ambient RMS = easier detection.</div>
+                                <div><strong>Key change banner</strong>: Blue notice appears right before automatic key change after streak completes.</div>
+                                <div style={{opacity:.75}}><strong>Tip</strong>: Play a clean, moderately firm attack and let the note ring briefly. Very soft or repeated staccato taps (or heavy sustain pedal blur) can delay stable detection.</div>
+                            </div>
+                        ) : (
+                            <div className={styles.helpSections} style={{ maxHeight:'52vh', overflowY:'auto', paddingRight:'.4rem' }}>
+                                <div><strong>Play</strong>: Cadence (if first time or after New Key) then a random note within your range & note set.</div>
+                                <div><strong>Autoplay</strong>: Continuous stream of random drill notes. Turn off for single-shot manual practice (use Play each time).</div>
+                                <div><strong>Repeat cadence</strong>: Reinforces tonic each autoplay cycle. Disable for bare tones after the first cadence.</div>
+                                <div><strong>Again</strong>: Replays cadence and (if autoplay off) the most recent note so you can re-listen.</div>
+                                <div><strong>New Key</strong>: Picks a different key center and immediately cadences before resuming drills.</div>
+                                <div><strong>Range</strong>: Tap new low/high endpoints directly on the keyboard (full A0–C8 always selectable here).</div>
+                                <div><strong>Note set</strong>: Diatonic (scale tones), Non-diatonic (chromatic neighbors only), Chromatic (all 12) controls selection pool.</div>
+                                <div><strong>Speeds</strong>: Cadence speed = chord pacing; Autoplay speed = delay between drills.</div>
+                                <div><strong>Solfege display</strong>: Movable-Do syllable appears with each played note (hidden in live mode until correct).</div>
+                                <div><strong>Transition to Live</strong>: Use Live Piano (top-right) to switch into microphone training workflow.</div>
+                                <div style={{opacity:.75}}><strong>Tip</strong>: Start diatonic first. Add non-diatonic tones once scale degrees feel automatic.</div>
+                            </div>
+                        )}
                         <div className={styles.helpFooter}>Movable-Do solfege; chromatic syllables: Ra Me Fi Le Te. © 2025</div>
                     </div>
                 </div>
