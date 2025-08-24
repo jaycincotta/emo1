@@ -12,8 +12,6 @@ import { ModeIndicator } from './components/ModeIndicator';
 
 const App: React.FC = () => {
     const audioCtxRef = useRef<AudioContext | null>(null);
-    // Unconditional startup log for diagnostics (console.debug may be filtered in some browsers)
-    console.log('[ear-trainer] App component mounted (startup log).');
     const [loadingInstrument, setLoadingInstrument] = useState(false); // mirrors AudioService.isLoading
     const [instrumentLoaded, setInstrumentLoaded] = useState(false); // mirrors AudioService.isLoaded
     const {
