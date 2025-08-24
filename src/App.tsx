@@ -8,9 +8,12 @@ import { useAudioUnlock } from './hooks/useAudioUnlock';
 import { useAutoplayCycle } from './hooks/useAutoplayCycle';
 import { UnlockOverlay } from './components';
 import { useInstrumentMode } from './hooks/useInstrumentMode';
+import { ModeIndicator } from './components/ModeIndicator';
 
 const App: React.FC = () => {
     const audioCtxRef = useRef<AudioContext | null>(null);
+    // Unconditional startup log for diagnostics (console.debug may be filtered in some browsers)
+    console.log('[ear-trainer] App component mounted (startup log).');
     const [loadingInstrument, setLoadingInstrument] = useState(false); // mirrors AudioService.isLoading
     const [instrumentLoaded, setInstrumentLoaded] = useState(false); // mirrors AudioService.isLoaded
     const {
@@ -127,7 +130,7 @@ const App: React.FC = () => {
     const cadenceActiveRef = useRef(false);
     const noteActiveRef = useRef(false);
     const pendingRandomKeyRef = useRef(false);
-    const autoplayResumeRef = useRef(false);
+    const autoplayResumeRef = useRef(false); // retained for now (legacy) but no longer used to stop/resume autoplay on key roll
     // Manual mode: track a single user-triggered test window for random key chance
     const manualUserActionRef = useRef(false);
 
@@ -180,11 +183,12 @@ const App: React.FC = () => {
                 noteActiveRef.current = true;
                 setTimeout(() => {
                     noteActiveRef.current = false;
+                    console.log('[autoplay] note finished', {pendingRandomKey: pendingRandomKeyRef.current, isPlaying: isPlayingRef.current});
                     if (pendingRandomKeyRef.current) {
                         pendingRandomKeyRef.current = false;
-                        const resumeAuto = autoplayResumeRef.current; autoplayResumeRef.current = false;
-                        randomKeyChangeFnRef.current?.(resumeAuto);
+                        randomKeyChangeFnRef.current?.(true); // always treat as resume in autoplay
                     } else if (isPlayingRef.current) {
+                        console.log('[autoplay] calling onNoteComplete');
                         onNoteComplete();
                     }
                 }, 1550);
@@ -198,11 +202,15 @@ const App: React.FC = () => {
             if (allow) {
                 const rolled = Math.random() * 100 < randomKeyChance;
                 if (rolled) {
-                    if (isPlayingRef.current) { autoplayResumeRef.current = true; stopPlaybackRef.current?.(); }
+                    // Autoplay: no longer stop playback; just flag pending key change handled after note
+                    if (isPlayingRef.current) {
+                        console.log('[autoplay] random key rolled (autoplay)');
+                    } else {
+                        console.log('[manual] random key rolled');
+                    }
                     pendingRandomKeyRef.current = true;
                 }
-                // Consume manual chance window after single evaluation (rolled or not) when not in autoplay
-                if (!isPlayingRef.current) manualUserActionRef.current = false;
+                if (!isPlayingRef.current) manualUserActionRef.current = false; // consume manual window
             }
         }
     }, [chooseRandomNote, playNote, randomKeyChance]);
@@ -216,6 +224,12 @@ const App: React.FC = () => {
         currentNote,
         playNote,
         instrumentLoaded,
+        applyKeyCenter: (k:string) => {
+            setKeyCenter(k);
+            keyCenterRef.current = k;
+            setCurrentNote(null);
+            setShowSolfege('');
+        }
     });
 
     // Keep refs in sync for guarded callbacks
@@ -419,14 +433,10 @@ const App: React.FC = () => {
                 if (cand !== keyCenterRef.current) { key = cand; break; }
             }
         }
-        setKeyCenter(key);
-        keyCenterRef.current = key;
-        setCurrentNote(null);
-        setShowSolfege('');
         if (!instrumentActive) {
             // Always initiate a test (cadence + note) on New Key button regardless of autoplay state
             manualUserActionRef.current = true; // start new manual window
-            markKeyChange(key); // ensure cadence even if repeatCadence off
+            markKeyChange(key); // ensure cadence even if repeatCadence off; actual key apply deferred to cadence
             startSequence(true, key);
         }
     }, [instrumentActive, startSequence]);
@@ -442,23 +452,19 @@ const App: React.FC = () => {
                 if (cand !== keyCenterRef.current) { key = cand; break; }
             }
         }
-        setKeyCenter(key);
-        keyCenterRef.current = key;
-        setCurrentNote(null);
-        setShowSolfege('');
         if (!instrumentActive) {
             if (resumeAuto || isPlayingRef.current) {
-                // Autoplay context: immediately start new test
-                markKeyChange(key, true); // immediate restart with cadence
-                startSequence(true, key);
+                // Autoplay context: mark key change; let onNoteComplete schedule cadence & next note
+                console.log('[autoplay] randomKeyChange defer scheduling', { key });
+                markKeyChange(key); // no immediate internalStart
+                onNoteComplete();
             } else {
-                // Manual: do NOT auto-start; user must press Play
-                manualUserActionRef.current = false; // consume manual window
-                // Mark pending so next manual Play will cadence first
+                // Manual: do NOT auto-start; user must press Play. Mark pending; key apply deferred to cadence of next Play.
+                manualUserActionRef.current = false;
                 markKeyChange(key);
             }
         }
-    }, [instrumentActive, startSequence]);
+    }, [instrumentActive, onNoteComplete]);
 
     useEffect(()=> { randomKeyChangeFnRef.current = randomKeyChange; }, [randomKeyChange]);
 
@@ -553,7 +559,8 @@ const App: React.FC = () => {
             <h1 className={styles.appHeader}>Solfege Ear Trainer</h1>
             <div className={`card ${styles.cardColumn}`}
                  style={{position:'relative', ...(instrumentActive ? {background: liveFeedback==='correct' ? '#053424' : liveFeedback==='near' ? '#442a07' : liveFeedback==='wrong' ? '#401414' : '#1b1f27', transition:'background .25s'} : {})}}>
-                <div style={{position:'absolute', top:8, right:8, display:'flex', gap:8, zIndex:2}}>
+                <div style={{position:'absolute', top:8, right:8, display:'flex', gap:8, zIndex:2, alignItems:'center'}}>
+                    <ModeIndicator mode={instrumentActive ? 'live' : (autoPlay ? 'autoplay' : 'manual')} />
                     {instrumentActive ? (
                         <button className="secondary" onClick={() => instrumentMode.stopMode()}>Exit Live</button>
                     ) : (

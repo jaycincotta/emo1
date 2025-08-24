@@ -10,6 +10,7 @@ export interface UseAutoplayCycleParams {
   currentNote: number | null;
   playNote: (midi: number, duration?: number) => void;
   instrumentLoaded: boolean;
+  applyKeyCenter?: (key: string) => void; // invoked right before cadence when pending key change becomes active
 }
 
 export interface UseAutoplayCycleReturn {
@@ -22,8 +23,10 @@ export interface UseAutoplayCycleReturn {
 }
 
 export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCycleReturn {
-  const { autoPlay, repeatCadence, autoPlaySpeed, scheduleCadence, updateRandomNote, currentNote, playNote, instrumentLoaded } = params;
+  const { autoPlay, repeatCadence, autoPlaySpeed, scheduleCadence, updateRandomNote, currentNote, playNote, instrumentLoaded, applyKeyCenter } = params;
+  const DEBUG = true; // set false to silence
   const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false);
   const cadenceTimeoutRef = useRef<number | null>(null);
   const autoplayTimeoutRef = useRef<number | null>(null);
   const firstPlayRef = useRef(true);
@@ -49,6 +52,9 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
     if (autoplayTimeoutRef.current) window.clearTimeout(autoplayTimeoutRef.current);
   };
 
+  // keep ref in sync
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
   const internalStart = useCallback((causeNewKeyCenter: boolean = false, keyOverride?: string) => {
     if (!instrumentLoaded) {
       // Defer until instrument is ready to ensure proper piano timbre (avoid oscillator fallback)
@@ -58,6 +64,7 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
     clearTimers();
   const autoplayMode = autoPlayRef.current;
     setIsPlaying(autoplayMode);
+  if (autoplayMode) console.log('[autoplay] set playing true'); else console.log('[autoplay] set playing false (manual single)');
     let delay = 0;
     const isFirst = firstPlayRef.current;
   // Cadence conditions:
@@ -65,6 +72,7 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
   // - Explicit key change
   // - Repeat cadence enabled (now applies in manual mode too)
   const needCadenceInitial = isFirst || causeNewKeyCenter || repeatCadenceRef.current;
+  console.log('[autoplay] internalStart', {causeNewKeyCenter, keyOverride, autoplayMode, needCadenceInitial, isFirst});
 
     const playInitial = () => {
       if (causeNewKeyCenter && keyOverride) lastKeyRef.current = keyOverride; else if (lastKeyRef.current == null) lastKeyRef.current = keyOverride || lastKeyRef.current;
@@ -73,6 +81,10 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
     };
 
     if (needCadenceInitial) {
+      // For explicit key changes initiated manually, update key center label right before cadence scheduling
+      if (causeNewKeyCenter && keyOverride && applyKeyCenter) {
+        applyKeyCenter(keyOverride);
+      }
       delay = scheduleCadenceRef.current(keyOverride) * 1000 + 400;
       cadenceTimeoutRef.current = window.setTimeout(playInitial, delay);
     } else {
@@ -108,22 +120,35 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
 
   // Callback to be invoked by caller after a note fully finishes (ensures consistent pause logic)
   const onNoteComplete = useCallback(() => {
-    if (!autoPlayRef.current || !isPlaying) return;
+    if (!autoPlayRef.current || !isPlayingRef.current) {
+      console.log('[autoplay] onNoteComplete aborted (not playing)');
+      return;
+    }
     const interval = AUTO_PLAY_INTERVAL[autoPlaySpeedRef.current];
+  if (DEBUG) console.log('[autoplay] onNoteComplete scheduling next in', interval);
     autoplayTimeoutRef.current = window.setTimeout(() => {
       if (!autoPlayRef.current) return;
       const nextKey = lastKeyRef.current; // key center managed externally; if it changed, caller will have invoked startSequence
       // Always cadence if repeatCadence OR a key change is pending (tracked via pendingKeyChangeRef)
       const needCadence = repeatCadenceRef.current || (pendingKeyChangeRef.current !== null && pendingKeyChangeRef.current !== lastKeyRef.current);
+  if (DEBUG) console.log('[autoplay] next cycle', {needCadence, repeat: repeatCadenceRef.current, pendingKeyChange: pendingKeyChangeRef.current, lastKey: lastKeyRef.current});
       if (needCadence) {
         const rawKey = pendingKeyChangeRef.current || nextKey;
-        if (pendingKeyChangeRef.current) { lastKeyRef.current = pendingKeyChangeRef.current; pendingKeyChangeRef.current = null; }
+        if (pendingKeyChangeRef.current) {
+          // Apply key center state externally right now so label changes with cadence start
+          if (rawKey && applyKeyCenter) applyKeyCenter(rawKey);
+          lastKeyRef.current = pendingKeyChangeRef.current;
+          pendingKeyChangeRef.current = null;
+        }
         const usedKey: string | undefined = rawKey || undefined;
         const cadDurSec = scheduleCadenceRef.current(usedKey) + 0.35; // include buffer
+  if (DEBUG) console.log('[autoplay] scheduling cadence then note', {usedKey, cadDurSec});
         cadenceTimeoutRef.current = window.setTimeout(() => {
+          if (DEBUG) console.log('[autoplay] cadence done -> note');
           updateRandomNoteRef.current({ play: true, keyOverride: usedKey });
         }, cadDurSec * 1000);
       } else {
+  if (DEBUG) console.log('[autoplay] scheduling direct note');
         updateRandomNoteRef.current({ play: true });
       }
     }, interval);
