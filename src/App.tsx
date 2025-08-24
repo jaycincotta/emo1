@@ -460,7 +460,14 @@ const App: React.FC = () => {
             />
             <h1 className={styles.appHeader}>Solfege Ear Trainer</h1>
             <div className={`card ${styles.cardColumn}`}
-                 style={instrumentActive ? {background: liveFeedback==='correct' ? '#053424' : liveFeedback==='near' ? '#442a07' : liveFeedback==='wrong' ? '#401414' : '#1b1f27', transition:'background .25s'} : undefined}>
+                 style={{position:'relative', ...(instrumentActive ? {background: liveFeedback==='correct' ? '#053424' : liveFeedback==='near' ? '#442a07' : liveFeedback==='wrong' ? '#401414' : '#1b1f27', transition:'background .25s'} : {})}}>
+                <div style={{position:'absolute', top:8, right:8, display:'flex', gap:8, zIndex:2}}>
+                    {instrumentActive ? (
+                        <button className="secondary" onClick={() => instrumentMode.stopMode()}>Exit Live</button>
+                    ) : (
+                        <button className="secondary" onClick={() => { if(!audioUnlocked) { setAudioUnlocked(true); } if(!instrumentLoaded) { initInstrument(); } instrumentMode.startMode(); }}>Live Piano</button>
+                    )}
+                </div>
                 <div className="key-name">Key Center: <strong>{keyDisplay}</strong></div>
                 <div className="solfege">
                     {instrumentActive ? (
@@ -529,12 +536,8 @@ const App: React.FC = () => {
                     )}
                     {!instrumentActive && <button className="secondary" onClick={() => triggerCadence()} disabled={currentNote == null}>Again</button>}
                     {!instrumentActive && <button className="secondary" onClick={() => newKeyCenter()}>New Key</button>}
-                    {!instrumentActive && (
-                        <button className="secondary" onClick={() => instrumentMode.startMode()}>Live Piano</button>
-                    )}
                     {instrumentActive && (
                         <>
-                            <button className="secondary" onClick={() => instrumentMode.stopMode()}>Exit Live</button>
                             <button className="secondary" onClick={() => startNewLiveTarget(true, false)} disabled={!liveTarget}>Again</button>
                             <button className="secondary" onClick={() => { newKeyCenterDifferent(); startNewLiveTarget(false, false); }}>New Key</button>
                             <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
