@@ -847,10 +847,17 @@ const App: React.FC = () => {
                                 {liveTarget!=null && <span style={{fontSize:'1.45rem',lineHeight:1,opacity:.92}}>{midiToName(liveTarget)}</span>}
                             </span>
                         ) : '—'
-                    ) : (showSolfege || '—')}
+                    ) : (
+                        showSolfege ? (
+                            <span style={{display:'inline-flex',alignItems:'baseline',gap:'.75rem'}}>
+                                <span style={{lineHeight:1}}>{showSolfege}</span>
+                                {currentNote!=null && <span style={{fontSize:'1.05rem',lineHeight:1,opacity:.85}}>{midiToName(currentNote)}</span>}
+                            </span>
+                        ) : '—'
+                    )}
                 </div>
                 <div className={`muted ${styles.muted}`}>
-                    {!instrumentActive && currentNote != null ? midiToName(currentNote) : ''}
+                    {/* Note name now shown inline with syllable for manual/autoplay; keep line for layout spacing */}
                 </div>
                 {instrumentActive && (
                     <div style={{marginTop:'.55rem', display:'flex', flexWrap:'wrap', alignItems:'center', gap:'0.85rem'}}>
