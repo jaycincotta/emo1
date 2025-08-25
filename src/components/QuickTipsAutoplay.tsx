@@ -8,7 +8,7 @@ export const QuickTipsAutoplay: React.FC<QuickTipsProps> = ({ className, style }
     return (
         <div className={className} style={style}>
             <div><strong>What</strong>: Practice anywhere, hands-free.</div>
-            <div><strong>How</strong>: Press play to start. Close your eyes as the note plays. Then open your eyes to check the Solfege syllable + highlighted piano key. Continues automatically until you Press Stop.</div>
+            <div><strong>How</strong>: Press play to start. Look away then look back to check your accuracy. Continues automatically until you Press Stop.</div>
 
             <h2 style={quickTipsH2Style}>Primary Actions</h2>
             <div><strong>Play / Stop</strong>: Start or pause the loop (remains in Autoplay mode when paused).</div>
