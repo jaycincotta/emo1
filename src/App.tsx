@@ -940,7 +940,7 @@ const App: React.FC = () => {
                         </label>}
                         {!instrumentActive && (
                             <label className={styles.prominentCheck} style={{display:'flex',alignItems:'center',gap:4}}>
-                                <span style={{fontSize:'.55rem'}}>Rand Key</span>
+                                <span style={{fontSize:'.55rem', paddingRight:'4px'}}>Rand Key</span>
                                 <input type="range" min={0} max={100} step={25} value={randomKeyChance} onChange={e=> setRandomKeyChance(Number(e.target.value))} style={{width:70}} />
                                 <span style={{fontSize:'.55rem', minWidth:24, textAlign:'right'}}>{randomKeyChance===0?'Off': randomKeyChance+'%'}</span>
                             </label>
