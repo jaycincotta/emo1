@@ -41,7 +41,12 @@ const App: React.FC = () => {
     const [keyCenter, setKeyCenter] = useState<string>('C');
     const keyCenterRef = useRef<string>('C');
     const [currentNote, setCurrentNote] = useState<number | null>(null);
+    const lastPlayedNoteRef = useRef<number | null>(null);
     const [showSolfege, setShowSolfege] = useState<string>('');
+    // Debounce lock for Again / New Key actions
+    const [disableActionButtons, setDisableActionButtons] = useState(false);
+    const disableActionButtonsRef = useRef(false);
+    useEffect(()=> { disableActionButtonsRef.current = disableActionButtons; }, [disableActionButtons]);
     // Cadence policy per requirements:
     // - Always cadence on first play or when key center changes.
     // - If autoplay ON: each cycle cadences only if repeatCadence is ON (else just notes after initial/new-key cadence).
@@ -178,6 +183,7 @@ const App: React.FC = () => {
         const note = chooseRandomNote();
         if (note == null) return;
         setCurrentNote(note);
+    lastPlayedNoteRef.current = note;
         const root = computeRoot(options?.keyOverride ?? keyCenterRef.current);
         const rel = (note - root + 1200) % 12;
         setShowSolfege(SOLFEGE_MAP[rel].syllable);
@@ -199,6 +205,10 @@ const App: React.FC = () => {
                     } else if (isPlayingRef.current) {
                         console.log('[autoplay] calling onNoteComplete');
                         onNoteComplete();
+                    }
+                    // Unlock action buttons after note completes (covers Again/New Key debounce)
+                    if (disableActionButtonsRef.current) {
+                        setDisableActionButtons(false);
                     }
                 }, 1550);
             }, 10);
@@ -224,7 +234,7 @@ const App: React.FC = () => {
         }
     }, [chooseRandomNote, playNote, randomKeyChance]);
 
-    const { isPlaying, startSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange, syncAutoplayFlag } = useAutoplayCycle({
+    const { isPlaying, startSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange, syncAutoplayFlag, interruptCycle, replaySameNoteWithCadence, setReplayCompleteHandler } = useAutoplayCycle({
         autoPlay: !instrumentLoaded ? autoPlay : (autoPlay && true),
         repeatCadence,
         autoPlaySpeed,
@@ -333,6 +343,7 @@ const App: React.FC = () => {
             if (liveRunning) {
                 setLiveRunning(false);
                 setLiveFeedback('idle');
+                setDisableActionButtons(false);
                 return;
             } else {
                 resetLiveState();
@@ -348,6 +359,7 @@ const App: React.FC = () => {
             stopPlayback(true);
             setCurrentNote(null);
             setShowSolfege('');
+            setDisableActionButtons(false);
             // Autoplay Stop now acts like pause: remain in autoplay mode (no mode switch)
             return;
         }
@@ -392,8 +404,7 @@ const App: React.FC = () => {
             if(!instrumentLoaded){ initInstrument().then(runAutoplay); } else { runAutoplay(); }
         }
     }, [isPlaying, instrumentActive, instrumentLoaded, initInstrument, stopPlayback, autoPlay, syncAutoplayFlag, startSequence, mode, liveRunning]);
-    const handleAgainClick = useCallback(() => { if (instrumentActive) return; activeControllerRef.current?.handleUser('again'); }, [instrumentActive]);
-    const handleNewKeyClick = useCallback(() => { if (instrumentActive) return; activeControllerRef.current?.handleUser('newKey'); }, [instrumentActive]);
+    // ...handlers moved below live mode helpers to avoid forward reference issues...
 
     // Live training workflow state (only used when instrumentActive)
     type AttemptFeedback = 'idle' | 'awaiting' | 'correct' | 'near' | 'wrong';
@@ -691,6 +702,80 @@ const App: React.FC = () => {
 
     const keyDisplay = `${keyCenter} Major`;
 
+    // Unified Again / New Key handlers (placed after all dependencies declared)
+    const handleAgainClick = useCallback(() => {
+    if (disableActionButtonsRef.current) return; // already locked
+        if (mode === 'live') {
+            if (!liveRunning || liveTarget == null) return;
+        setDisableActionButtons(true);
+        // Conservative timeout unlock (cadence + note ~ up to 4s worst case slow)
+        setTimeout(()=> { if (disableActionButtonsRef.current) setDisableActionButtons(false); }, 4000);
+            startNewLiveTarget(true, false);
+            return;
+        }
+        if (mode === 'manual') {
+            if (currentNote == null) { console.log('[again][manual] ignored (no currentNote)'); return; }
+        setDisableActionButtons(true);
+            // Manual replay: schedule cadence then current note; unlock after note
+            const cadSec = scheduleCadence();
+            setTimeout(() => {
+                if (currentNote != null) {
+                    playNote(currentNote, 1.4);
+                    setTimeout(() => { setDisableActionButtons(false); }, 1550);
+                } else {
+                    setDisableActionButtons(false);
+                }
+            }, cadSec * 1000 + 350);
+            return;
+        }
+        if (mode === 'autoplay') {
+            const noteToReplay = currentNote ?? lastPlayedNoteRef.current;
+            if (noteToReplay == null) { console.log('[again][autoplay] ignored (no note available)'); return; }
+        setDisableActionButtons(true);
+        console.log('[again][autoplay] replay request');
+        // Safety fallback in case completion callback not fired (should rarely happen)
+        setTimeout(()=> { if (disableActionButtonsRef.current) { console.log('[again][autoplay] safety unlock'); setDisableActionButtons(false); } }, 6000);
+        setReplayCompleteHandler(() => { console.log('[again][autoplay] replay complete'); setDisableActionButtons(false); setReplayCompleteHandler(null); });
+            replaySameNoteWithCadence(noteToReplay);
+        }
+    }, [mode, liveRunning, liveTarget, currentNote, scheduleCadence, playNote, replaySameNoteWithCadence, startNewLiveTarget, setReplayCompleteHandler]);
+
+    const handleNewKeyClick = useCallback(() => {
+    if (disableActionButtonsRef.current) return;
+        let key = keyCenterRef.current;
+        if (keysCircle.length > 1) {
+            for (let i=0;i<30;i++) {
+                const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
+                if (cand !== keyCenterRef.current) { key = cand; break; }
+            }
+        }
+        if (mode === 'live') {
+        setDisableActionButtons(true);
+        setTimeout(()=> { if (disableActionButtonsRef.current) setDisableActionButtons(false); }, 4200);
+            newKeyCenterDifferent();
+            if (liveRunning) startNewLiveTarget(false, false);
+            return;
+        }
+        markKeyChange(key);
+        if (mode === 'manual') {
+        setDisableActionButtons(true);
+            const launch = () => {
+                startSequence(true, key).then(() => { /* unlock via note completion */ });
+                // Fallback unlock if nothing happens (e.g., instrument load delay) in 5s
+                setTimeout(()=> { if (disableActionButtonsRef.current) setDisableActionButtons(false); }, 5000);
+            };
+            if (!instrumentLoaded) { initInstrument().then(launch); } else { launch(); }
+        } else if (mode === 'autoplay') {
+        setDisableActionButtons(true);
+            interruptCycle();
+            const launch = () => {
+                startSequence(true, key).then(()=>{/* unlock after note completion */});
+                setTimeout(()=> { if (disableActionButtonsRef.current) setDisableActionButtons(false); }, 5000);
+            };
+            if (!instrumentLoaded) { initInstrument().then(launch); } else { launch(); }
+        }
+    }, [mode, liveRunning, startSequence, interruptCycle, newKeyCenterDifferent, startNewLiveTarget, instrumentLoaded, initInstrument]);
+
     // Ensure instrument loads automatically once audio is unlocked (desktop auto-unlock path)
     useEffect(() => {
         if (audioUnlocked && !instrumentLoaded) {
@@ -817,10 +902,10 @@ const App: React.FC = () => {
                     <button onClick={handlePlayClick} disabled={loadingInstrument}>
                         {mode==='live' ? (liveRunning ? '■ Stop' : '▶ Play') : (isPlaying ? '■ Stop' : '▶ Play')}
                     </button>
-                    {mode!=='live' && <button className="secondary" onClick={handleAgainClick} disabled={currentNote == null}>Again</button>}
-                    {mode==='live' && <button className="secondary" onClick={() => startNewLiveTarget(true, false)} disabled={!liveRunning || !liveTarget}>Again</button>}
-                    {mode!=='live' && <button className="secondary" onClick={handleNewKeyClick}>New Key</button>}
-                    {mode==='live' && <button className="secondary" onClick={() => { newKeyCenterDifferent(); if(liveRunning) startNewLiveTarget(false, false); }}>New Key</button>}
+                    {mode!=='live' && <button className="secondary" onClick={handleAgainClick} disabled={(mode!=='autoplay' && currentNote == null) || disableActionButtons}>Again</button>}
+                    {mode==='live' && <button className="secondary" onClick={handleAgainClick} disabled={!liveRunning || !liveTarget || disableActionButtons}>Again</button>}
+                    {mode!=='live' && <button className="secondary" onClick={handleNewKeyClick} disabled={disableActionButtons}>New Key</button>}
+                    {mode==='live' && <button className="secondary" onClick={handleNewKeyClick} disabled={disableActionButtons}>New Key</button>}
                     {mode==='live' && (
                         <>
                             <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>

@@ -21,6 +21,9 @@ export interface UseAutoplayCycleReturn {
   onNoteComplete: () => void; // call after a drill note (and any random-key handling) fully finishes
   markKeyChange: (newKey: string, immediate?: boolean) => void; // register a key change so next cycle/play forces cadence
   syncAutoplayFlag: (value: boolean) => void; // force-update internal autoplay ref before immediate start
+  interruptCycle: () => void; // clear pending timers without toggling isPlaying
+  replaySameNoteWithCadence: (note: number) => void; // autoplay-specific Again behavior
+  setReplayCompleteHandler: (fn: (()=>void)|null) => void; // caller notified when replay note finished
 }
 
 export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCycleReturn {
@@ -194,5 +197,32 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
   }, [originalInternalStart]);
 
   const syncAutoplayFlag = (value: boolean) => { autoPlayRef.current = value; };
-  return { isPlaying, startSequence: wrappedStartSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange, syncAutoplayFlag };
+  const interruptCycle = () => { clearTimers(); };
+  const replayCompleteRef = useRef<(()=>void)|null>(null);
+  const setReplayCompleteHandler = (fn: (()=>void)|null) => { replayCompleteRef.current = fn; };
+  const replaySameNoteWithCadence = (note: number) => {
+    if (!note && note !== 0) return;
+    // Always force a cadence before replay regardless of repeatCadence setting
+    if (!instrumentLoaded) return;
+    clearTimers();
+    // If a key change is pending, apply it now so label matches cadence
+    if (pendingKeyChangeRef.current && applyKeyCenter) {
+      applyKeyCenter(pendingKeyChangeRef.current);
+      lastKeyRef.current = pendingKeyChangeRef.current;
+      pendingKeyChangeRef.current = null;
+    }
+    const keyForCadence = lastKeyRef.current || pendingKeyChangeRef.current || undefined;
+    const cadDurSec = scheduleCadenceRef.current(keyForCadence) + 0.35; // include buffer
+    cadenceTimeoutRef.current = window.setTimeout(() => {
+      playNote(note, 1.4);
+      // Simulate normal cycle completion after note ends
+      const noteMs = 1550; // mirrors updateRandomNote timing
+      window.setTimeout(() => {
+        onNoteComplete();
+    replayCompleteRef.current?.();
+      }, noteMs);
+    }, cadDurSec * 1000);
+  };
+
+  return { isPlaying, startSequence: wrappedStartSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange, syncAutoplayFlag, interruptCycle, replaySameNoteWithCadence, setReplayCompleteHandler };
 }
