@@ -9,6 +9,9 @@ import { useAutoplayCycle } from './hooks/useAutoplayCycle';
 import { UnlockOverlay } from './components';
 import { useInstrumentMode } from './hooks/useInstrumentMode';
 import { ModeIndicator } from './components/ModeIndicator';
+import { ControllerManager } from './core/controllers/ControllerManager';
+import { ModeController } from './core/controllers/ControllerTypes';
+import { chooseTarget as chooseTargetHelper } from './core/chooseTarget';
 
 const App: React.FC = () => {
     const audioCtxRef = useRef<AudioContext | null>(null);
@@ -131,6 +134,8 @@ const App: React.FC = () => {
     const autoplayResumeRef = useRef(false); // retained for now (legacy) but no longer used to stop/resume autoplay on key roll
     // Manual mode: track a single user-triggered test window for random key chance
     const manualUserActionRef = useRef(false);
+    // Queue for manual Play pressed while note still sounding
+    const pendingManualPlayRef = useRef(false);
 
     // Refs for values defined later (avoid forward dependency issues in updateRandomNote)
     const isPlayingRef = useRef(false);
@@ -185,6 +190,11 @@ const App: React.FC = () => {
                     if (pendingRandomKeyRef.current) {
                         pendingRandomKeyRef.current = false;
                         randomKeyChangeFnRef.current?.(true); // always treat as resume in autoplay
+                    } else if (pendingManualPlayRef.current) {
+                        // Manual queued play request
+                        pendingManualPlayRef.current = false;
+                        manualUserActionRef.current = true;
+                        startSequence(false);
                     } else if (isPlayingRef.current) {
                         console.log('[autoplay] calling onNoteComplete');
                         onNoteComplete();
@@ -213,7 +223,7 @@ const App: React.FC = () => {
         }
     }, [chooseRandomNote, playNote, randomKeyChance]);
 
-    const { isPlaying, startSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange } = useAutoplayCycle({
+    const { isPlaying, startSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange, syncAutoplayFlag } = useAutoplayCycle({
         autoPlay: !instrumentLoaded ? autoPlay : (autoPlay && true),
         repeatCadence,
         autoPlaySpeed,
@@ -230,6 +240,22 @@ const App: React.FC = () => {
         }
     });
 
+    // Controller layer integration (phase migration)
+    const controllerManagerRef = useRef<ControllerManager | null>(null);
+    const activeControllerRef = useRef<ModeController | null>(null);
+
+    const settingsSnapshot = useCallback(() => ({
+        cadenceSpeed,
+        autoPlaySpeed,
+        repeatCadence,
+        randomKeyChance,
+        noteMode,
+        low: lowPitch,
+        high: highPitch,
+    }), [cadenceSpeed, autoPlaySpeed, repeatCadence, randomKeyChance, noteMode, lowPitch, highPitch]);
+
+    // (moved below instrumentActive for proper ordering)
+
     // Keep refs in sync for guarded callbacks
     useEffect(() => { isPlayingRef.current = isPlaying; stopPlaybackRef.current = stopPlayback; }, [isPlaying, stopPlayback]);
 
@@ -238,6 +264,109 @@ const App: React.FC = () => {
     const instrumentActive = instrumentMode.active;
     // keep ref in sync for updateRandomNote callback
     useEffect(()=> { instrumentActiveRef.current = instrumentActive; }, [instrumentActive]);
+
+    // Controller layer (relocated)
+    const controllerContext = useRef({
+        getCurrentKey: () => keyCenterRef.current,
+        setKeyCenter: (k: string) => { markKeyChange(k); },
+        setCurrentNote: (m: number | null) => setCurrentNote(m),
+        scheduleStart: ({ causeNewKey, reason }: { causeNewKey?: boolean; reason: 'play'|'again'|'auto'|'newKey'|'liveNext' }) => {
+            if (reason === 'again') {
+                if (currentNote != null) { triggerCadence(); } else { startSequence(!!causeNewKey); }
+                return;
+            }
+            if (causeNewKey) {
+                let key = keyCenterRef.current;
+                if (keysCircle.length > 1) {
+                    for (let i=0;i<30;i++) {
+                        const cand = keysCircle[Math.floor(Math.random()*keysCircle.length)] as string;
+                        if (cand !== keyCenterRef.current) { key = cand; break; }
+                    }
+                }
+                markKeyChange(key);
+                startSequence(true, key);
+            } else {
+                startSequence(false);
+            }
+        },
+        chooseTarget: (prev?: number|null) => chooseTargetHelper({
+            low: lowPitch,
+            high: highPitch,
+            noteMode,
+            keyRoot: computeRoot(keyCenterRef.current),
+            prev: prev ?? null,
+        }) || 0,
+        settingsSnapshot,
+    });
+
+    useEffect(() => {
+        const desired: 'manual'|'autoplay'|'live' = instrumentActive ? 'live' : (autoPlay ? 'autoplay' : 'manual');
+        console.log('[mode] switching controller ->', desired);
+        if (!controllerManagerRef.current) {
+            controllerManagerRef.current = new ControllerManager(controllerContext.current as any);
+        }
+        const mgr = controllerManagerRef.current;
+        const c = mgr.switch(desired);
+        activeControllerRef.current = c;
+    }, [autoPlay, instrumentActive]);
+
+    const handlePlayClick = useCallback(() => {
+        if (instrumentActive) return;
+        console.log('[ui] Play click', { isPlaying, autoPlay, noteActive: noteActiveRef.current });
+        if (isPlaying) {
+            console.log('[stop] stopping playback; switching to manual');
+            stopPlayback(true);
+            setCurrentNote(null);
+            setShowSolfege('');
+            if (autoPlay) {
+                setAutoPlay(false);
+                markKeyChange(keyCenterRef.current); // force cadence on next manual play
+            }
+            return;
+        }
+        if (noteActiveRef.current) {
+            pendingManualPlayRef.current = true;
+            console.log('[manual] queued play until current note completes');
+            return;
+        }
+        manualUserActionRef.current = true;
+        const runManual = () => {
+            console.log('[manual] starting single test');
+            const safetyRefired = { fired: false };
+            const safetyTimeout = window.setTimeout(() => {
+                if (safetyRefired.fired) return;
+                if (!cadenceActiveRef.current && !noteActiveRef.current) {
+                    safetyRefired.fired = true;
+                    console.log('[manual][fallback] idle after play -> forcing test');
+                    markKeyChange(keyCenterRef.current);
+                    startSequence(false);
+                }
+            }, 1200);
+            startSequence(false).then(() => {
+                const checkKick = () => {
+                    if (cadenceActiveRef.current || noteActiveRef.current) {
+                        window.clearTimeout(safetyTimeout);
+                        safetyRefired.fired = true;
+                    } else if (!safetyRefired.fired) {
+                        setTimeout(checkKick, 150);
+                    }
+                };
+                setTimeout(checkKick, 120);
+            });
+        };
+        const runAutoplay = () => {
+            console.log('[autoplay][ui] starting autoplay sequence');
+            syncAutoplayFlag(true);
+            startSequence(false);
+        };
+        if (!autoPlay) {
+            if(!instrumentLoaded){ initInstrument().then(runManual); } else { runManual(); }
+        } else {
+            if(!instrumentLoaded){ initInstrument().then(runAutoplay); } else { runAutoplay(); }
+        }
+    }, [isPlaying, instrumentActive, instrumentLoaded, initInstrument, stopPlayback, autoPlay, syncAutoplayFlag, startSequence]);
+    const handleAgainClick = useCallback(() => { if (instrumentActive) return; activeControllerRef.current?.handleUser('again'); }, [instrumentActive]);
+    const handleNewKeyClick = useCallback(() => { if (instrumentActive) return; activeControllerRef.current?.handleUser('newKey'); }, [instrumentActive]);
 
     // Live training workflow state (only used when instrumentActive)
     type AttemptFeedback = 'idle' | 'awaiting' | 'correct' | 'near' | 'wrong';
@@ -627,12 +756,12 @@ const App: React.FC = () => {
             <div className={`card ${styles.controlsCard}`}>
                 <div className={styles.topControls}>
                     {!instrumentActive && (
-                        <button onClick={() => { if (isPlaying) { stopPlayback(true); setCurrentNote(null); setShowSolfege(''); } else { manualUserActionRef.current = true; if(!instrumentLoaded){ initInstrument().then(()=> startSequence()); } else { startSequence(); } } }} disabled={loadingInstrument}>
+                        <button onClick={handlePlayClick} disabled={loadingInstrument}>
                             {isPlaying ? '■ Stop' : '▶ Play'}
                         </button>
                     )}
-                    {!instrumentActive && <button className="secondary" onClick={() => triggerCadence()} disabled={currentNote == null}>Again</button>}
-                    {!instrumentActive && <button className="secondary" onClick={() => newKeyCenter()}>New Key</button>}
+                    {!instrumentActive && <button className="secondary" onClick={handleAgainClick} disabled={currentNote == null}>Again</button>}
+                    {!instrumentActive && <button className="secondary" onClick={handleNewKeyClick}>New Key</button>}
                     {instrumentActive && (
                         <>
                             <button className="secondary" onClick={() => startNewLiveTarget(true, false)} disabled={!liveTarget}>Again</button>

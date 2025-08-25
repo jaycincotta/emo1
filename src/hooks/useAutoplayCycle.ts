@@ -20,6 +20,7 @@ export interface UseAutoplayCycleReturn {
   triggerCadence: () => Promise<void>;
   onNoteComplete: () => void; // call after a drill note (and any random-key handling) fully finishes
   markKeyChange: (newKey: string, immediate?: boolean) => void; // register a key change so next cycle/play forces cadence
+  syncAutoplayFlag: (value: boolean) => void; // force-update internal autoplay ref before immediate start
 }
 
 export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCycleReturn {
@@ -192,5 +193,6 @@ export function useAutoplayCycle(params: UseAutoplayCycleParams): UseAutoplayCyc
     await originalInternalStart(causeNewKeyCenter, keyOverride);
   }, [originalInternalStart]);
 
-  return { isPlaying, startSequence: wrappedStartSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange };
+  const syncAutoplayFlag = (value: boolean) => { autoPlayRef.current = value; };
+  return { isPlaying, startSequence: wrappedStartSequence, stopPlayback, triggerCadence, onNoteComplete, markKeyChange, syncAutoplayFlag };
 }
