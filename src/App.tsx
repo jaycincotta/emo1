@@ -8,7 +8,6 @@ import { useAudioUnlock } from './hooks/useAudioUnlock';
 import { useAutoplayCycle } from './hooks/useAutoplayCycle';
 import { UnlockOverlay } from './components';
 import { useInstrumentMode } from './hooks/useInstrumentMode';
-import { ModeIndicator } from './components/ModeIndicator';
 import { ControllerManager } from './core/controllers/ControllerManager';
 import { ModeController } from './core/controllers/ControllerTypes';
 import { chooseTarget as chooseTargetHelper } from './core/chooseTarget';
@@ -48,7 +47,9 @@ const App: React.FC = () => {
     // - If autoplay ON: each cycle cadences only if repeatCadence is ON (else just notes after initial/new-key cadence).
     {/* Removed FullKeyboard component to avoid compile error */ }
     const [repeatCadence, setRepeatCadence] = useState(true);
-    const [autoPlay, setAutoPlay] = useState(true);
+    // Unified mode selector replaces separate autoplay checkbox + Live button
+    const [mode, setMode] = useState<'manual'|'autoplay'|'live'>('autoplay');
+    const autoPlay = mode === 'autoplay';
     // Note selection mode: diatonic only, non-diatonic only, or chromatic (both)
     const [noteMode, setNoteMode] = useState<'diatonic' | 'non' | 'chromatic'>('diatonic');
     // Full keyboard shown; keep existing low/high state for note selection but hide UI controls
@@ -261,7 +262,11 @@ const App: React.FC = () => {
 
     // Instrument (Live Piano) mode hook integration
     const instrumentMode = useInstrumentMode({ keyCenterRef, getAudioContext: () => audioCtxRef.current });
-    const instrumentActive = instrumentMode.active;
+    const instrumentActive = instrumentMode.active; // underlying mic state
+    // Live mode play/stop (targets) controlled separately from mic active
+    const [liveRunning, setLiveRunning] = useState(false);
+    const liveRunningRef = useRef(false);
+    useEffect(()=> { liveRunningRef.current = liveRunning; }, [liveRunning]);
     // keep ref in sync for updateRandomNote callback
     useEffect(()=> { instrumentActiveRef.current = instrumentActive; }, [instrumentActive]);
 
@@ -310,18 +315,40 @@ const App: React.FC = () => {
         activeControllerRef.current = c;
     }, [autoPlay, instrumentActive]);
 
+    // Respond to mode selector changes: start/stop live mic, reset liveRunning
+    useEffect(() => {
+        if (mode === 'live') {
+            if (!instrumentActive) instrumentMode.startMode();
+            setLiveRunning(false); // will start on Play
+        } else {
+            if (instrumentActive) instrumentMode.stopMode();
+            setLiveRunning(false);
+        }
+    }, [mode]);
+
     const handlePlayClick = useCallback(() => {
-        if (instrumentActive) return;
+        if (mode === 'live') {
+            // Live mode Play/Stop toggles target cycle (mic already handled by mode switch)
+            console.log('[ui] Live mode Play click', { liveRunning });
+            if (liveRunning) {
+                setLiveRunning(false);
+                setLiveFeedback('idle');
+                return;
+            } else {
+                resetLiveState();
+                setLiveRunning(true);
+                startNewLiveTarget(false);
+                return;
+            }
+        }
+        if (instrumentActive) return; // safety
         console.log('[ui] Play click', { isPlaying, autoPlay, noteActive: noteActiveRef.current });
         if (isPlaying) {
-            console.log('[stop] stopping playback; switching to manual');
+            console.log('[stop] stopping playback');
             stopPlayback(true);
             setCurrentNote(null);
             setShowSolfege('');
-            if (autoPlay) {
-                setAutoPlay(false);
-                markKeyChange(keyCenterRef.current); // force cadence on next manual play
-            }
+            // Autoplay Stop now acts like pause: remain in autoplay mode (no mode switch)
             return;
         }
         if (noteActiveRef.current) {
@@ -364,7 +391,7 @@ const App: React.FC = () => {
         } else {
             if(!instrumentLoaded){ initInstrument().then(runAutoplay); } else { runAutoplay(); }
         }
-    }, [isPlaying, instrumentActive, instrumentLoaded, initInstrument, stopPlayback, autoPlay, syncAutoplayFlag, startSequence]);
+    }, [isPlaying, instrumentActive, instrumentLoaded, initInstrument, stopPlayback, autoPlay, syncAutoplayFlag, startSequence, mode, liveRunning]);
     const handleAgainClick = useCallback(() => { if (instrumentActive) return; activeControllerRef.current?.handleUser('again'); }, [instrumentActive]);
     const handleNewKeyClick = useCallback(() => { if (instrumentActive) return; activeControllerRef.current?.handleUser('newKey'); }, [instrumentActive]);
 
@@ -539,12 +566,10 @@ const App: React.FC = () => {
     // When entering live mode, initialize workflow
     useEffect(() => {
         if (instrumentActive) {
-            // stop autoplay playback if running
             if (isPlaying) stopPlayback(true);
             resetLiveState();
-            startNewLiveTarget(false);
+            // defer target start until user presses Play in live mode
         } else {
-            // leaving live mode
             resetLiveState();
         }
     }, [instrumentActive]);
@@ -647,6 +672,23 @@ const App: React.FC = () => {
         }
     }, [currentNote, keyCenter]);
 
+    // Unified mode change handler: ensures current controller/test stops cleanly
+    const changeMode = useCallback((next: 'manual'|'autoplay'|'live') => {
+        if (next === mode) return;
+        // If leaving autoplay while playing, stop but remain in autoplay until cleanup done
+        if (mode === 'autoplay' && isPlaying) {
+            console.log('[modeChange] stopping autoplay before switching to', next);
+            stopPlayback(true);
+            setCurrentNote(null);
+            setShowSolfege('');
+        }
+        if (mode === 'live') {
+            // Stop live target flow
+            setLiveRunning(false);
+        }
+        setMode(next);
+    }, [mode, isPlaying, stopPlayback]);
+
     const keyDisplay = `${keyCenter} Major`;
 
     // Ensure instrument loads automatically once audio is unlocked (desktop auto-unlock path)
@@ -686,13 +728,30 @@ const App: React.FC = () => {
             <h1 className={styles.appHeader}>Solfege Ear Trainer</h1>
             <div className={`card ${styles.cardColumn}`}
                  style={{position:'relative', ...(instrumentActive ? {background: liveFeedback==='correct' ? '#053424' : liveFeedback==='near' ? '#442a07' : liveFeedback==='wrong' ? '#401414' : '#1b1f27', transition:'background .25s'} : {})}}>
-                <div style={{position:'absolute', top:8, right:8, display:'flex', gap:8, zIndex:2, alignItems:'center'}}>
-                    <ModeIndicator mode={instrumentActive ? 'live' : (autoPlay ? 'autoplay' : 'manual')} />
-                    {instrumentActive ? (
-                        <button className="secondary" onClick={() => instrumentMode.stopMode()}>Exit Live</button>
-                    ) : (
-                        <button className="secondary" onClick={() => { if(!audioUnlocked) { setAudioUnlocked(true); } if(!instrumentLoaded) { initInstrument(); } instrumentMode.startMode(); }}>Live Piano</button>
-                    )}
+                <div style={{position:'absolute', top:8, right:8, display:'flex', gap:6, zIndex:2, alignItems:'center'}}>
+                    <div style={{display:'flex', alignItems:'center', gap:6}}>
+                        <span style={{fontSize:'.6rem', fontWeight:700, letterSpacing:'.5px', color:'#cbd5e1'}}>Mode:</span>
+                        <div style={{display:'inline-flex', background:'#1e293b', padding:4, borderRadius:6}}>
+                            {['manual','autoplay','live'].map(m => (
+                                <button key={m}
+                                    onClick={() => { if (m !== mode) changeMode(m as any); }}
+                                    style={{
+                                        background: m===mode ? '#059669' : 'transparent',
+                                        color: m===mode ? '#fff':'#cbd5e1',
+                                        border:'1px solid '+(m===mode ? '#10b981':'#334155'),
+                                        fontSize:'.6rem',
+                                        padding:'.4rem .75rem',
+                                        borderRadius:4,
+                                        cursor:'pointer',
+                                        fontWeight:700,
+                                        textTransform:'uppercase',
+                                        letterSpacing:'.5px',
+                                        minWidth:70,
+                                        transition:'background .15s,border-color .15s'
+                                    }}>{m}</button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
                 <div className="key-name">Key Center: <strong>{keyDisplay}</strong></div>
                 <div className="solfege">
@@ -755,17 +814,15 @@ const App: React.FC = () => {
             })()}
             <div className={`card ${styles.controlsCard}`}>
                 <div className={styles.topControls}>
-                    {!instrumentActive && (
-                        <button onClick={handlePlayClick} disabled={loadingInstrument}>
-                            {isPlaying ? '■ Stop' : '▶ Play'}
-                        </button>
-                    )}
-                    {!instrumentActive && <button className="secondary" onClick={handleAgainClick} disabled={currentNote == null}>Again</button>}
-                    {!instrumentActive && <button className="secondary" onClick={handleNewKeyClick}>New Key</button>}
-                    {instrumentActive && (
+                    <button onClick={handlePlayClick} disabled={loadingInstrument}>
+                        {mode==='live' ? (liveRunning ? '■ Stop' : '▶ Play') : (isPlaying ? '■ Stop' : '▶ Play')}
+                    </button>
+                    {mode!=='live' && <button className="secondary" onClick={handleAgainClick} disabled={currentNote == null}>Again</button>}
+                    {mode==='live' && <button className="secondary" onClick={() => startNewLiveTarget(true, false)} disabled={!liveRunning || !liveTarget}>Again</button>}
+                    {mode!=='live' && <button className="secondary" onClick={handleNewKeyClick}>New Key</button>}
+                    {mode==='live' && <button className="secondary" onClick={() => { newKeyCenterDifferent(); if(liveRunning) startNewLiveTarget(false, false); }}>New Key</button>}
+                    {mode==='live' && (
                         <>
-                            <button className="secondary" onClick={() => startNewLiveTarget(true, false)} disabled={!liveTarget}>Again</button>
-                            <button className="secondary" onClick={() => { newKeyCenterDifferent(); startNewLiveTarget(false, false); }}>New Key</button>
                             <label className={styles.prominentCheck} style={{ fontSize:'.55rem', padding:'.25rem .55rem' }}>
                                 <input type="checkbox" checked={liveStrict} onChange={e=>setLiveStrict(e.target.checked)} />Strict
                             </label>
@@ -775,10 +832,7 @@ const App: React.FC = () => {
                         </>
                     )}
                     <div className={styles.prominentToggles}>
-                        {!instrumentActive && <label className={styles.prominentCheck}>
-                            <input type="checkbox" checked={autoPlay} onChange={e => { const next = e.target.checked; setAutoPlay(next); if (!next) { stopPlayback(); } /* enabling no longer auto-starts */ }} />Autoplay
-                        </label>}
-                        {!instrumentActive && <label className={styles.prominentCheck}>
+                        {mode!=='live' && <label className={styles.prominentCheck}>
                             <input type="checkbox" checked={repeatCadence} onChange={e => setRepeatCadence(e.target.checked)} />Repeat cadence
                         </label>}
                         {!instrumentActive && (
@@ -800,7 +854,7 @@ const App: React.FC = () => {
                         )}
                     </div>
                 </div>
-                {!instrumentActive && (
+                {mode!=='live' && (
                     <div className={`row ${styles.rowWrap}`}>
                         <div className="stack">
                             <label className={styles.stackLabel}>
@@ -834,7 +888,7 @@ const App: React.FC = () => {
                         </div>
                     </div>
                 )}
-                {instrumentActive && (
+                {mode==='live' && (
                     <div style={{ marginTop:'.6rem', display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode technical panel">
                         <div style={{ minWidth:110 }}>
                             <strong>Level</strong><br />
