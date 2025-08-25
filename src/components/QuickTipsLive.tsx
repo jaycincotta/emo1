@@ -8,7 +8,7 @@ export const QuickTipsLive: React.FC<QuickTipsProps> = ({ className, style }) =>
     return (
         <div className={className} style={style}>
             <div><strong>What</strong>: Practice at your piano.</div>
-            <div><strong>How</strong>: Press play to start. Try to match the note on your piano then watch the app for feedback. Press Stop when you're done.</div>
+            <div><strong>How</strong>: Press play to start. Try to match the note on your piano then watch the app for feedback. Change modes when you're done to release mic.</div>
             <div><strong>Feedback</strong>: Green exact · Orange correct degree wrong octave · Red wrong degree.</div>
 
             <h2 style={quickTipsH2Style}>Primary Actions</h2>
