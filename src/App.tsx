@@ -945,8 +945,8 @@ const App: React.FC = () => {
                                 <span style={{fontSize:'.55rem', minWidth:24, textAlign:'right'}}>{randomKeyChance===0?'Off': randomKeyChance+'%'}</span>
                             </label>
                         )}
-                        {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>}
-                        {instrumentActive && instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic</div>}
+                        {/* {instrumentActive && <div style={{ fontSize:'.7rem', opacity:.8, padding:'.25rem .5rem' }}>Live mode</div>} */}
+                        {/* Mic badge moved to live technical panel */}
                         {instrumentActive && instrumentMode.error && <div style={{ fontSize:'.55rem', background:'#a00', color:'#fff', padding:'.18rem .4rem', borderRadius:4 }}>Mic Err</div>}
                         {instrumentActive && (
                             <label className={styles.prominentCheck} style={{display:'flex',alignItems:'center',gap:4}}>
@@ -992,7 +992,11 @@ const App: React.FC = () => {
                     </div>
                 )}
                 {mode==='live' && (
-                    <div style={{ marginTop:'.6rem', display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3 }} aria-label="Live mode technical panel">
+                    <div style={{ marginTop:'.6rem', display:'flex', flexWrap:'wrap', gap:'1rem', fontSize:'.7rem', lineHeight:1.3, alignItems:'center' }} aria-label="Live mode technical panel">
+                        {/* <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                            <div style={{ fontSize:'.7rem', opacity:.85, padding:'.25rem .5rem', background:'#1e293b', borderRadius:6 }}>Live mode</div>
+                            {instrumentMode.listening && <div style={{ fontSize:'.55rem', background:'#0a4', color:'#fff', padding:'.18rem .45rem', borderRadius:4, boxShadow:'0 0 4px rgba(0,160,64,.5)' }}>Mic</div>}
+                        </div> */}
                         <div style={{ minWidth:110 }}>
                             <strong>Level</strong><br />
                             <div style={{ background:'#243140', width:100, height:8, borderRadius:4, overflow:'hidden', position:'relative' }}>
@@ -1016,14 +1020,14 @@ const App: React.FC = () => {
                                                         <option value={2}>High</option>
                                                     </select>
                                                 </div>
-                                                <div style={{ minWidth:190 }}>
+                                                {/* <div style={{ minWidth:190 }}>
                                                     <strong>Profile</strong><br />
                                                     <div style={{ fontSize:'.55rem', lineHeight:1.15, opacity:.8 }}>
                                                         {instrumentMode.sensitivityProfile.mode==='auto' && <span style={{ display:'block' }}>amb rms {instrumentMode.sensitivityProfile.ambientRms.toFixed(3)} clr {instrumentMode.sensitivityProfile.ambientClarity.toFixed(2)}</span>}
                                                         clr {instrumentMode.sensitivityProfile.clarity.toFixed(2)} | rms {instrumentMode.sensitivityProfile.rms.toFixed(3)}<br />
                                                         fr {instrumentMode.sensitivityProfile.frames} / {instrumentMode.sensitivityProfile.stableMs}ms | jit ±{instrumentMode.sensitivityProfile.jitterSpan}
                                                     </div>
-                                                </div>
+                                                </div> */}
                                                 <div style={{ flexBasis:'100%', height:0 }} />
                                                 {/* Metrics moved to top card; technical stats only here */}
                     </div>
