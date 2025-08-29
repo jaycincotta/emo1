@@ -546,7 +546,8 @@ const App: React.FC = () => {
                             setLiveCongrats(false);
                             newKeyCenter();
                             setLiveStreak(0);
-                            startNewLiveTarget(false, !liveRepeatCadence);
+                            // Force cadence on streak key change regardless of repeat setting
+                            startNewLiveTarget(false, false);
                         }, 2200);
                         return;
                     }
@@ -607,12 +608,16 @@ const App: React.FC = () => {
                 if (cand !== keyCenterRef.current) { key = cand; break; }
             }
         }
-        if (!instrumentActive) {
-            // Always initiate a test (cadence + note) on New Key button regardless of autoplay state
-            manualUserActionRef.current = true; // start new manual window
-            markKeyChange(key); // ensure cadence even if repeatCadence off; actual key apply deferred to cadence
-            startSequence(true, key);
+        if (instrumentActive) {
+            // Live mode: apply key immediately
+            setKeyCenter(key);
+            keyCenterRef.current = key;
+            return;
         }
+        // Manual / Autoplay: initiate cadence + note sequence
+        manualUserActionRef.current = true; // start new manual window
+        markKeyChange(key); // ensure cadence even if repeatCadence off; actual key apply deferred to cadence
+        startSequence(true, key);
     }, [instrumentActive, startSequence]);
 
     useEffect(() => { newKeyCenterFnRef.current = newKeyCenter; }, [newKeyCenter]);
